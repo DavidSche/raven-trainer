@@ -20,7 +20,7 @@ class FrameDetector:
     def __init__(self, model_path: Optional[str] = None, conf_threshold: float = 0.5):
         self.model_path = model_path or "yolo26n.pt"
         self.conf_threshold = conf_threshold
-        self._model = None
+        self._model: Any = None
 
     def _lazy_load(self):
         if self._model is None:

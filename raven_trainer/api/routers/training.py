@@ -40,6 +40,17 @@ def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     _main_loop = loop
 
 
+def _set_active_status(exp_id: str, status: str) -> None:
+    """Update the in-memory status of an active training run.
+
+    Tolerates the entry having already been removed (e.g. the experiment was
+    deleted from the UI while the background thread was still finishing).
+    """
+    entry = _active_training.get(exp_id)
+    if entry is not None:
+        entry["status"] = status
+
+
 def _exp_to_schema(exp: Experiment) -> ExperimentSchema:
     return ExperimentSchema(
         id=exp.experiment_id,
@@ -64,14 +75,14 @@ def _exp_to_schema(exp: Experiment) -> ExperimentSchema:
 
 
 @router.get("/training/experiments")
-async def list_experiments(limit: int = Query(50)):
+def list_experiments(limit: int = Query(50)):
     experiments = scan_all_experiments()
     experiments.sort(key=lambda x: x.created_at, reverse=True)
     return [_exp_to_schema(e) for e in experiments[:limit]]
 
 
 @router.get("/training/experiments/{experiment_id}")
-async def get_experiment(experiment_id: str):
+def get_experiment(experiment_id: str):
     experiments = scan_all_experiments()
     for e in experiments:
         if e.experiment_id == experiment_id:
@@ -80,7 +91,7 @@ async def get_experiment(experiment_id: str):
 
 
 @router.get("/training/experiments/{experiment_id}/config")
-async def get_experiment_config(experiment_id: str):
+def get_experiment_config(experiment_id: str):
     """Get full experiment configuration with reproducibility info."""
     experiments = scan_all_experiments()
     for e in experiments:
@@ -94,15 +105,12 @@ async def get_experiment_config(experiment_id: str):
 
 
 @router.delete("/training/experiments/{experiment_id}")
-async def delete_experiment(experiment_id: str):
+def delete_experiment(experiment_id: str):
     """Delete an experiment record and its associated files."""
     experiments = scan_all_experiments()
     for e in experiments:
         if e.experiment_id == experiment_id:
-            exp_dir = R.project_dir(e.project) / "experiments" / experiment_id
-            if exp_dir.exists():
-                import shutil
-                shutil.rmtree(exp_dir)
+            ExperimentManager(e.project).delete(experiment_id)
             _active_training.pop(experiment_id, None)
             _ws_clients.pop(experiment_id, None)
             _cancel_events.pop(experiment_id, None)
@@ -111,7 +119,7 @@ async def delete_experiment(experiment_id: str):
 
 
 @router.get("/training/experiments/{experiment_id}/log")
-async def get_experiment_log(experiment_id: str):
+def get_experiment_log(experiment_id: str):
     """Get training log content."""
     experiments = scan_all_experiments()
     for e in experiments:
@@ -123,8 +131,13 @@ async def get_experiment_log(experiment_id: str):
 
 
 @router.get("/training/experiments/{experiment_id}/report")
-async def get_experiment_report(experiment_id: str):
+def get_experiment_report(experiment_id: str):
     """Get training report HTML content."""
+    # Only serve reports for experiments that actually exist in the registry;
+    # this keeps the path fully derived from trusted metadata.
+    known = next((e for e in scan_all_experiments() if e.experiment_id == experiment_id), None)
+    if known is None:
+        raise HTTPException(404, f"Experiment '{experiment_id}' not found")
     for scan_root in [R.PROJECTS]:
         if not scan_root.exists():
             continue
@@ -141,7 +154,7 @@ async def get_experiment_report(experiment_id: str):
 
 
 @router.get("/training/experiments/{experiment_id}/results")
-async def get_experiment_results(experiment_id: str):
+def get_experiment_results(experiment_id: str):
     """Get training results: CSV data and list of generated images.
 
     Ported from aiva-trainer: parses results.csv, lists plot images.
@@ -177,9 +190,10 @@ def _collect_experiment_results(exp: Experiment) -> Dict[str, Any]:
 
     # Read results.csv
     csv_data = []
+    headers: List[str] = []
     csv_path = run_dir / "results.csv"
     if csv_path.exists():
-        with open(csv_path) as f:
+        with open(csv_path, encoding="utf-8") as f:
             lines = f.readlines()
         if lines:
             headers = [h.strip() for h in lines[0].split(",")]
@@ -187,7 +201,7 @@ def _collect_experiment_results(exp: Experiment) -> Dict[str, Any]:
                 line = line.strip()
                 if line:
                     values = line.split(",")
-                    row = {}
+                    row: Dict[str, Any] = {}
                     for i, h in enumerate(headers):
                         if i < len(values):
                             try:
@@ -199,22 +213,22 @@ def _collect_experiment_results(exp: Experiment) -> Dict[str, Any]:
     # List image files
     image_extensions = {".png", ".jpg", ".jpeg"}
     images = []
-    for f in sorted(run_dir.iterdir()):
-        if f.suffix.lower() in image_extensions:
+    for img_path in sorted(run_dir.iterdir()):
+        if img_path.suffix.lower() in image_extensions:
             images.append({
-                "name": f.name,
-                "path": str(f.resolve()),
-                "size": f.stat().st_size,
+                "name": img_path.name,
+                "path": str(img_path.resolve()),
+                "size": img_path.stat().st_size,
             })
 
     weights_dir = run_dir / "weights"
     if weights_dir.exists():
-        for f in sorted(weights_dir.iterdir()):
-            if f.suffix.lower() in image_extensions:
+        for img_path in sorted(weights_dir.iterdir()):
+            if img_path.suffix.lower() in image_extensions:
                 images.append({
-                    "name": f"weights/{f.name}",
-                    "path": str(f.resolve()),
-                    "size": f.stat().st_size,
+                    "name": f"weights/{img_path.name}",
+                    "path": str(img_path.resolve()),
+                    "size": img_path.stat().st_size,
                 })
 
     args_content = ""
@@ -226,7 +240,7 @@ def _collect_experiment_results(exp: Experiment) -> Dict[str, Any]:
         "exists": True,
         "run_dir": str(run_dir.resolve()),
         "csv": {
-            "headers": headers if csv_data else [],
+            "headers": headers,
             "rows": csv_data,
         },
         "images": images,
@@ -238,7 +252,7 @@ def _collect_experiment_results(exp: Experiment) -> Dict[str, Any]:
 
 
 @router.post("/training/start")
-async def start_training(cfg: ExperimentConfigSchema):
+def start_training(cfg: ExperimentConfigSchema):
     """Start training in a background thread with full hyperparameter support."""
     project_dir = R.project_dir(cfg.project)
     if not project_dir.exists():
@@ -258,11 +272,11 @@ async def start_training(cfg: ExperimentConfigSchema):
 
     # Load full training hyperparams from train.yaml
     train_yaml_path = project_dir / "train.yaml"
-    train_hyperparams = {}
+    train_hyperparams: Dict[str, Any] = {}
     if train_yaml_path.exists():
         import yaml as _yaml
         try:
-            with open(train_yaml_path) as _f:
+            with open(train_yaml_path, encoding="utf-8") as _f:
                 train_hyperparams = _yaml.safe_load(_f) or {}
         except Exception:
             pass
@@ -306,7 +320,7 @@ async def start_training(cfg: ExperimentConfigSchema):
     # Start background training
     thread = threading.Thread(
         target=_run_training_thread,
-        args=(cfg, exp, mgr, cancel_event),
+        args=(cfg, exp, mgr, cancel_event, job.job_id),
         daemon=True,
     )
     thread.start()
@@ -318,15 +332,33 @@ async def start_training(cfg: ExperimentConfigSchema):
     }
 
 
+def _finish_job(job_id: str, status: JobStatus, error: str = "") -> None:
+    """Close out the job record created by ``start_training``.
+
+    The job exists so the UI can list the run as an active operation; without
+    this the record would stay ``running`` forever (and be marked failed by the
+    startup recovery sweep after a restart).
+    """
+    if not job_id:
+        return
+    try:
+        JobManager().update_status(job_id, status, error=error)
+    except (ValueError, OSError):
+        pass
+
+
 def _run_training_thread(
     cfg: ExperimentConfigSchema,
     exp: Experiment,
     mgr: ExperimentManager,
     cancel_event: threading.Event,
+    job_id: str = "",
 ):
     """Run training in background thread with log streaming and cancellation."""
     exp_id = exp.experiment_id
     log_lines: List[str] = []
+    job_status = JobStatus.FAILED
+    job_error = ""
 
     def _log(msg: str):
         log_lines.append(msg)
@@ -350,9 +382,9 @@ def _run_training_thread(
         _log(f"  Epochs:  {cfg.epochs}")
         _log(f"  Batch:   {cfg.batch}")
         _log(f"  Device:  {cfg.device}")
-        _log(f"")
+        _log("")
 
-        _log(f"[Train] Calling training function...")
+        _log("[Train] Calling training function...")
 
         from ...cli.train import _do_train
 
@@ -380,10 +412,19 @@ def _run_training_thread(
                 mgr.update_status(exp_id, "cancelled")
                 _log(f"[Train] {exp_id} cancelled.")
                 _active_training[exp_id]["status"] = "cancelled"
+                job_status = JobStatus.CANCELLED
+            elif cancel_event.is_set():
+                # The user pressed stop and the adapter returned normally anyway:
+                # never rewrite a user-cancelled run as completed.
+                mgr.update_status(exp_id, "cancelled")
+                _log(f"[Train] {exp_id} cancelled.")
+                _set_active_status(exp_id, "cancelled")
+                job_status = JobStatus.CANCELLED
             else:
                 mgr.update_status(exp_id, "completed")
                 _log(f"[Train] {exp_id} completed successfully")
                 _active_training[exp_id]["status"] = "completed"
+                job_status = JobStatus.COMPLETED
 
                 # Collect metrics
                 if result:
@@ -400,7 +441,7 @@ def _run_training_thread(
                             _log(f"    mAP50: {v['onnx_val'].get('map50', 'N/A')}")
                             _log(f"    mAP50-95: {v['onnx_val'].get('map_95', 'N/A')}")
                     if result.get("platform_registered"):
-                        _log(f"  Platform: model registered to raven-go")
+                        _log("  Platform: model registered to raven-go")
 
                 # Generate training report
                 try:
@@ -412,9 +453,9 @@ def _run_training_thread(
                     import yaml as _yaml
 
                     ds_yaml = project_dir / "dataset.yaml"
-                    dataset_cfg = {}
+                    dataset_cfg: Dict[str, Any] = {}
                     if ds_yaml.exists():
-                        with open(ds_yaml) as _f:
+                        with open(ds_yaml, encoding="utf-8") as _f:
                             dataset_cfg = _yaml.safe_load(_f) or {}
 
                     cfg_dict = {
@@ -454,23 +495,29 @@ def _run_training_thread(
         except Exception as e:
             mgr.update_status(exp_id, "failed", error=str(e))
             _log(f"[Train] {exp_id} FAILED: {e}")
-            _active_training[exp_id]["status"] = "failed"
+            _set_active_status(exp_id, "failed")
+            job_error = str(e)
             import traceback
             _log(traceback.format_exc())
 
     except Exception as e:
         mgr.update_status(exp_id, "failed", error=str(e))
         _log(f"[Train] ERROR: {e}")
-        _active_training[exp_id]["status"] = "failed"
+        _set_active_status(exp_id, "failed")
+        job_error = str(e)
         import traceback
         _log(traceback.format_exc())
+    finally:
+        # The cancel event is only useful while the worker is alive.
+        _cancel_events.pop(exp_id, None)
+        _finish_job(job_id, job_status, job_error)
 
 
 # ── Stop / Status ──
 
 
 @router.post("/training/stop")
-async def stop_training(data: dict):
+def stop_training(data: dict):
     """Stop a running training by setting cancellation event."""
     experiment_id = data.get("experiment_id", "")
     if not experiment_id:
@@ -481,10 +528,17 @@ async def stop_training(data: dict):
     if cancel_event:
         cancel_event.set()
 
-    # Update status
+    # Update status only while the experiment is still running; a late "stop"
+    # click must not rewrite a completed/failed record as cancelled.
     experiments = scan_all_experiments()
     for e in experiments:
         if e.experiment_id == experiment_id:
+            if e.status not in ("running", "pending"):
+                return {
+                    "status": "not-running",
+                    "experiment_id": experiment_id,
+                    "current_status": e.status,
+                }
             mgr = ExperimentManager(e.project)
             mgr.update_status(experiment_id, "cancelled")
             break
@@ -494,7 +548,7 @@ async def stop_training(data: dict):
 
 
 @router.get("/training/status")
-async def training_status():
+def training_status():
     """Check status of all training runs."""
     results = {}
     for eid, info in _active_training.items():
@@ -510,7 +564,7 @@ async def training_status():
 
 
 @router.post("/training/experiments/compare")
-async def compare_experiments(data: dict):
+def compare_experiments(data: dict):
     """Compare multiple experiments."""
     ids = data.get("experiment_ids", [])
     if not ids:
@@ -557,10 +611,10 @@ class CreateProjectRequest(BaseModel):
 
 
 @router.post("/training/projects")
-async def create_training_project(req: CreateProjectRequest):
+def create_training_project(req: CreateProjectRequest):
     """Create a new training project (equivalent to `raven-train new`)."""
     from ...cli.new import ProjectScaffolder
-    
+
     # Determine dataset source from path
     ds_source = "local"
     if "cvat" in req.dataset_path.lower():
@@ -575,23 +629,33 @@ async def create_training_project(req: CreateProjectRequest):
         model=req.model,
         dataset_source=ds_source,
     )
-    
+
     try:
         project_dir = scaffolder.run()
-    except FileExistsError:
-        from fastapi import HTTPException
-        raise HTTPException(400, f"Project '{req.name}' already exists")
-    
+    except FileExistsError as exc:
+        raise HTTPException(400, f"Project '{req.name}' already exists") from exc
+
     # Update dataset.yaml with actual paths if provided
     if req.dataset_yaml:
+        # A client-supplied YAML path must stay inside the data roots: this
+        # endpoint copies the file into the new project, so an unchecked path
+        # would let a caller read any file the server can read.
         import yaml
-        ds_yaml_path = project_dir / "dataset.yaml"
-        if ds_yaml_path.exists():
-            with open(req.dataset_yaml) as f:
-                real_ds = yaml.safe_load(f) or {}
-            with open(ds_yaml_path, "w") as f:
-                yaml.dump(real_ds, f, default_flow_style=False, sort_keys=False)
-    
+        ds_src = Path(req.dataset_yaml).expanduser()
+        if not ds_src.is_absolute():
+            ds_src = R.PROJECT_ROOT / ds_src
+        try:
+            ds_src = ds_src.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(404, f"dataset_yaml not found: {req.dataset_yaml}") from exc
+        allowed_roots = (R.PROJECT_ROOT.resolve(), R.DATA.resolve())
+        if not any(ds_src.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(400, "dataset_yaml must point inside the project or data directory")
+        with open(ds_src, encoding="utf-8") as f:
+            real_ds = yaml.safe_load(f) or {}
+        with open(project_dir / "dataset.yaml", "w", encoding="utf-8") as f:
+            yaml.safe_dump(real_ds, f, default_flow_style=False, sort_keys=False)
+
     return {
         "status": "created",
         "name": req.name,
@@ -634,7 +698,7 @@ async def training_websocket(websocket: WebSocket, experiment_id: str):
 
 
 @router.get("/training/experiments/{experiment_id}/results-image")
-async def get_experiment_result_image(experiment_id: str, name: str = ""):
+def get_experiment_result_image(experiment_id: str, name: str = ""):
     """Serve a training result image file.
 
     Ported from aiva-trainer: serves plot images from run directory.
@@ -675,12 +739,13 @@ async def get_experiment_result_image(experiment_id: str, name: str = ""):
 
     if ".." in name or name.startswith("/") or name.startswith("\\\\"):
         raise HTTPException(400, "Invalid image name")
-    image_path = (exp_dir / name).resolve()
-    if not str(image_path).startswith(str(exp_dir.resolve())):
+    root = exp_dir.resolve()
+    image_path = (root / name).resolve()
+    if not image_path.is_relative_to(root):
         raise HTTPException(400, "Invalid image name")
     if not image_path.exists():
-        image_path = (exp_dir / "weights" / name).resolve()
-        if not str(image_path).startswith(str(exp_dir.resolve())):
+        image_path = (root / "weights" / name).resolve()
+        if not image_path.is_relative_to(root):
             raise HTTPException(400, "Invalid image name")
     if not image_path.exists():
         raise HTTPException(404, f"Image '{name}' not found")
@@ -692,7 +757,7 @@ async def get_experiment_result_image(experiment_id: str, name: str = ""):
 
 
 @router.get("/training/projects")
-async def list_training_projects():
+def list_training_projects():
     """List available training projects."""
     results = []
     projects_dir = R.PROJECTS
@@ -704,7 +769,7 @@ async def list_training_projects():
             if config_path.exists():
                 import yaml
                 try:
-                    with open(config_path) as f:
+                    with open(config_path, encoding="utf-8") as f:
                         data = yaml.safe_load(f) or {}
                     results.append({
                         "name": proj_dir.name,

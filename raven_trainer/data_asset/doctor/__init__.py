@@ -140,7 +140,7 @@ class DatasetDoctor:
         # 3. Manifest 健康检查
         if manifest_path and manifest_path.exists():
             import json
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 lines = [l for l in f if l.strip()]
             if len(lines) != metadata_count and metadata_count > 0:
                 checks.append(HealthCheckItem(
@@ -178,7 +178,7 @@ class DatasetDoctor:
             for lf in label_files:
                 if lf.stat().st_size == 0:
                     continue
-                with open(lf) as f:
+                with open(lf, encoding="utf-8") as f:
                     for line in f:
                         parts = line.strip().split()
                         if len(parts) >= 5:

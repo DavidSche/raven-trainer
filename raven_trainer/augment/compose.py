@@ -1,10 +1,18 @@
-"""Data augmentation pipeline with industrial-specific transforms."""
+"""Data augmentation pipeline with industrial-specific transforms.
+
+.. warning::
+   ``CopyPaste`` and ``OcclusionAug`` are API placeholders: their pixel/label
+   logic is not implemented. They raise ``NotImplementedError`` when called
+   instead of silently returning the input unchanged, which previously made an
+   "industrial" pipeline look like it was augmenting data when it was not.
+   Training uses the backend's own augmentation (Ultralytics/MMDetection
+   ``augment`` section), so nothing in the product path depends on them.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class AugmentTransform(ABC):
@@ -41,13 +49,29 @@ class AugmentPipeline:
 
     def to_config(self) -> List[Dict[str, Any]]:
         """Serialize pipeline to config dict."""
-        return [{"name": t.name} for t in self.transforms]
+        return [{"name": t.name, "params": dict(vars(t))} for t in self.transforms]
 
     @classmethod
     def from_config(cls, config: List[Dict[str, Any]]) -> "AugmentPipeline":
-        """Build pipeline from config dict."""
-        # TODO: lookup transforms by name and instantiate
-        return cls()
+        """Build pipeline from config dict (inverse of :meth:`to_config`).
+
+        Unknown transform names are rejected: silently dropping them made a
+        configured pipeline run with fewer transforms than requested.
+        """
+        pipeline = cls()
+        for entry in config:
+            if not isinstance(entry, dict):
+                raise ValueError(f"Invalid transform entry: {entry!r}")
+            name = entry.get("name", "")
+            factory = _TRANSFORM_REGISTRY.get(name)
+            if factory is None:
+                raise KeyError(
+                    f"Unknown augmentation transform: {name!r}. "
+                    f"Known transforms: {sorted(_TRANSFORM_REGISTRY)}"
+                )
+            params = entry.get("params") or {}
+            pipeline.add(factory(**params))
+        return pipeline
 
 
 class CopyPaste(AugmentTransform):
@@ -64,8 +88,11 @@ class CopyPaste(AugmentTransform):
         self.max_instances = max_instances
 
     def __call__(self, image: Any, labels: Any, **kwargs) -> Any:
-        # TODO: implement copy-paste logic
-        return image, labels
+        raise NotImplementedError(
+            "CopyPaste augmentation is not implemented yet; configure the "
+            "backend's own copy-paste augmentation instead (e.g. Ultralytics "
+            "`copy_paste`)."
+        )
 
 
 class OcclusionAug(AugmentTransform):
@@ -83,8 +110,17 @@ class OcclusionAug(AugmentTransform):
         self.max_occlusion_ratio = max_occlusion_ratio
 
     def __call__(self, image: Any, labels: Any, **kwargs) -> Any:
-        # TODO: implement occlusion simulation
-        return image, labels
+        raise NotImplementedError(
+            "OcclusionAug is not implemented yet; use the backend's own "
+            "occlusion/mosaic augmentation instead."
+        )
+
+
+# Name -> factory used by AugmentPipeline.from_config()/_TRANSFORM_REGISTRY.
+_TRANSFORM_REGISTRY: Dict[str, Any] = {
+    "copy_paste": CopyPaste,
+    "occlusion": OcclusionAug,
+}
 
 
 class IndustrialAugment(AugmentPipeline):
@@ -97,9 +133,14 @@ class IndustrialAugment(AugmentPipeline):
 
     @classmethod
     def default(cls) -> "IndustrialAugment":
-        """Create the standard industrial augmentation pipeline."""
-        pipeline = cls()
-        # Required industrial augmentations
-        pipeline.add(CopyPaste(p=0.5))
-        pipeline.add(OcclusionAug(p=0.3))
-        return pipeline
+        """Create the standard industrial augmentation pipeline.
+
+        Raises instead of returning a pipeline whose transforms are no-ops:
+        the transforms below are not implemented, so a "default" pipeline would
+        silently apply zero augmentation.
+        """
+        raise NotImplementedError(
+            "IndustrialAugment.default() requires CopyPaste/OcclusionAug, which "
+            "are not implemented; use the training backend's augmentation "
+            "configuration (train.yaml `augment:`) instead."
+        )

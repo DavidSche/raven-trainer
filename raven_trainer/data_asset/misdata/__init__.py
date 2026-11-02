@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from ...config import R
 from ...asset_manager import AssetManager
@@ -85,8 +85,7 @@ class MisdataManager:
         model = YOLO(str(model_path))
         total = 0
         false_positives = 0
-        true_positives = 0
-        stats = {"by_class": {}, "total_images": 0}
+        stats: Dict[str, Any] = {"by_class": {}, "total_images": 0}
 
         for f in sorted(self.misdata_dir.iterdir()):
             if f.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
@@ -129,7 +128,7 @@ class MisdataManager:
 
         # 创建 Manifest 记录
         am = AssetManager()
-        records = []
+        records: List[Dict[str, Any]] = []
         for f in sorted(self.misdata_dir.iterdir()):
             if f.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
                 continue
@@ -165,5 +164,3 @@ class MisdataManager:
         registry.update(asset)
 
         return len(records)
-
-

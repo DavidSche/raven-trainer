@@ -129,7 +129,7 @@ class DatasetRecipe:
     def save_to_asset(self, asset_dir: Path, recipe_name: str = "default") -> Path:
         recipe_dir = asset_dir / "recipes"
         recipe_dir.mkdir(parents=True, exist_ok=True)
-        path = recipe_dir / f"recipe_{recipe_name}.yaml"
+        path = recipe_dir / f"recipe_{validate_name(recipe_name, 'recipe name')}.yaml"
         self.save(path)
         return path
 
@@ -147,7 +147,7 @@ class RecipeManager:
         return sorted(self.recipes_dir.glob("recipe_*.yaml"))
 
     def get_recipe(self, name: str = "default") -> Optional[DatasetRecipe]:
-        path = self.recipes_dir / f"recipe_{name}.yaml"
+        path = self.recipes_dir / f"recipe_{validate_name(name, 'recipe name')}.yaml"
         if path.exists():
             return DatasetRecipe.from_yaml(path)
         return None
@@ -161,7 +161,7 @@ class RecipeManager:
 # ──────────────────────────────────────────────
 
 
-from ...config import R as _R
+from ...config import R as _R, validate_name
 
 class CatalogRecipeManager:
     """全局 Recipe 目录——独立于任何单个数据集。
@@ -187,14 +187,14 @@ class CatalogRecipeManager:
 
     def get_recipe(self, name: str) -> Optional[DatasetRecipe]:
         """按名称获取 Recipe。"""
-        path = self.recipes_root / name / "recipe.yaml"
+        path = self.recipes_root / validate_name(name, "recipe name") / "recipe.yaml"
         if path.exists():
             return DatasetRecipe.from_yaml(path)
         return None
 
     def save_recipe(self, recipe: DatasetRecipe, name: Optional[str] = None) -> Path:
         """保存 Recipe。如果未指定名称则使用 recipe.name。"""
-        recipe_name = name or recipe.name
+        recipe_name = validate_name(name or recipe.name, "recipe name")
         path = self.recipes_root / recipe_name / "recipe.yaml"
         recipe.save(path)
         return path
@@ -202,15 +202,7 @@ class CatalogRecipeManager:
     def delete_recipe(self, name: str) -> None:
         """删除 Recipe。"""
         import shutil
-        # Reject path-traversal attempts: name must not contain separators or ..
-        if not name or "/" in name or "\\" in name or ".." in name:
-            raise ValueError(f"Invalid recipe name: {name!r}")
-        path = (self.recipes_root / name).resolve()
-        # Defense-in-depth: resolved path must stay under recipes_root
-        try:
-            path.relative_to(self.recipes_root.resolve())
-        except ValueError:
-            raise ValueError(f"Invalid recipe name (path traversal): {name!r}")
+        path = self.recipes_root / validate_name(name, "recipe name")
         if path.exists():
             shutil.rmtree(path)
 
@@ -234,4 +226,3 @@ class CatalogRecipeManager:
                 "versions": [v.version for v in versions],
             })
         return result
-

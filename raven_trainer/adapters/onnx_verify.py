@@ -75,7 +75,7 @@ def verify_onnx_consistency(
         result["error"] = f"dataset.yaml not found: {dataset_yaml}"
         return result
 
-    with open(yaml_path) as f:
+    with open(yaml_path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     val_path_str: str = data.get("val", "")
     val_path = Path(val_path_str)

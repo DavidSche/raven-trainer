@@ -101,4 +101,3 @@ def compute_laplacian_variance(img: np.ndarray) -> float:
 def compute_mean_brightness(img: np.ndarray) -> float:
     """Compute mean pixel value across all channels (0-255)."""
     return float(np.mean(img))
-

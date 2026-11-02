@@ -73,6 +73,9 @@ _DB_COLUMNS = [
     "label_count", "has_annotation",
 ]
 
+# ``query()`` interpolates column names into SQL, so filters are whitelisted.
+_COLUMNS = frozenset(_DB_COLUMNS)
+
 _INSERT_SQL = f"""
 INSERT OR REPLACE INTO image_metadata (
     {', '.join(_DB_COLUMNS)}
@@ -184,6 +187,17 @@ class MetadataStore:
         self._db.executescript(_SCHEMA_SQL)
         self._db.commit()
 
+    def _require_db(self) -> sqlite3.Connection:
+        """Return the live connection or fail loudly.
+
+        Replaces bare ``assert self._db is not None``: assertions disappear
+        under ``python -O``, which would turn every method into an
+        ``AttributeError: 'NoneType' object has no attribute 'execute'``.
+        """
+        if self._db is None:
+            raise RuntimeError("MetadataStore is closed")
+        return self._db
+
     def _db_params(self, meta: ImageMetadata) -> tuple:
         """Extract values matching _DB_COLUMNS order for SQL parameters."""
         return (
@@ -249,65 +263,68 @@ class MetadataStore:
     def add(self, meta: ImageMetadata) -> None:
         """Add a metadata record. Writes to both SQLite and JSONL."""
         # 1. SQLite (primary)
-        assert self._db is not None
-        self._db.execute(_INSERT_SQL, self._db_params(meta))
-        self._db.commit()
+        db = self._require_db()
+        db.execute(_INSERT_SQL, self._db_params(meta))
+        db.commit()
         # 2. JSONL (backup)
         self._write_jsonl(meta)
 
     def add_batch(self, metas: List[ImageMetadata]) -> None:
         """Add multiple records efficiently (single transaction for SQLite)."""
-        assert self._db is not None
-        with self._db:
+        db = self._require_db()
+        with db:
             for meta in metas:
-                self._db.execute(_INSERT_SQL, self._db_params(meta))
+                db.execute(_INSERT_SQL, self._db_params(meta))
         # JSONL append
         for meta in metas:
             self._write_jsonl(meta)
 
     def query(self, **filters) -> List[ImageMetadata]:
-        """Query metadata using SQL WHERE clauses (M-25: was O(3N) full load)."""
-        assert self._db is not None
-        self._db.row_factory = sqlite3.Row
+        """Query metadata using SQL WHERE clauses (M-25: was O(3N) full load).
+
+        Column names are whitelisted: they are interpolated into the SQL string,
+        so an unknown/attacker-supplied key must never reach ``execute``.
+        """
+        db = self._require_db()
+        db.row_factory = sqlite3.Row
+        unknown = set(filters) - _COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown metadata column(s): {sorted(unknown)}")
         if not filters:
-            rows = self._db.execute(
+            rows = db.execute(
                 "SELECT * FROM image_metadata LIMIT 10000"
             ).fetchall()
         else:
             clauses = []
             params: list = []
             for key, value in filters.items():
-                if key == "has_annotation":
-                    clauses.append(f"{key} = ?")
-                    params.append(int(value))
-                else:
-                    clauses.append(f"{key} = ?")
-                    params.append(value)
+                clauses.append(f"{key} = ?")
+                params.append(int(value) if key == "has_annotation" else value)
             where = " AND ".join(clauses)
-            rows = self._db.execute(
+            rows = db.execute(
                 f"SELECT * FROM image_metadata WHERE {where}", params
             ).fetchall()
         return [self._row_to_metadata(r) for r in rows]
 
     def count(self) -> int:
         """Return total image count."""
-        assert self._db is not None
-        row = self._db.execute("SELECT COUNT(*) FROM image_metadata").fetchone()
+        db = self._require_db()
+        row = db.execute("SELECT COUNT(*) FROM image_metadata").fetchone()
         return row[0] if row else 0
 
     def get_statistics(self) -> Dict[str, Any]:
         """Return aggregate statistics."""
-        assert self._db is not None
+        db = self._require_db()
         total = self.count()
         if total == 0:
             return {}
         # Cameras
-        cam_rows = self._db.execute(
+        cam_rows = db.execute(
             "SELECT DISTINCT camera FROM image_metadata WHERE camera != ''"
         ).fetchall()
         cameras = [r[0] for r in cam_rows]
         # Avg quality
-        row = self._db.execute(
+        row = db.execute(
             "SELECT AVG(quality_score) FROM image_metadata"
         ).fetchone()
         avg_q = row[0] if row and row[0] is not None else 0.0
@@ -323,6 +340,20 @@ class MetadataStore:
             self._db.close()
             self._db = None
 
+    def __enter__(self) -> "MetadataStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self):
+        # Last-resort cleanup: SQLite connections hold a file handle that
+        # prevents the metadata dir from being deleted/moved on Windows.
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def migrate_from_jsonl(self) -> int:
         """One-time migration: import existing JSONL data into SQLite.
 
@@ -335,8 +366,8 @@ class MetadataStore:
         if not all_ids:
             return 0
         count = 0
-        assert self._db is not None
-        with self._db:
+        db = self._require_db()
+        with db:
             for img_id in all_ids:
                 merged: Dict[str, Any] = {}
                 merged.update(images.get(img_id, {}))
@@ -366,6 +397,6 @@ class MetadataStore:
                 merged.setdefault("label_count", 0)
                 merged.setdefault("has_annotation", 0)
                 meta = ImageMetadata(**merged)
-                self._db.execute(_INSERT_SQL, self._db_params(meta))
+                db.execute(_INSERT_SQL, self._db_params(meta))
                 count += 1
         return count

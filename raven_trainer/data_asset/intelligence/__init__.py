@@ -76,21 +76,21 @@ class IntelligenceReport:
             f"{'='*50}",
             f"  Images:      {self.total_images} ({self.annotated_images} annotated, {self.background_images} background)",
             f"  Annotations: {self.total_annotations}",
-            f"  Background:  {self.background_ratio:.1f}%",
-            f"",
-            f"  Object Sizes:",
-            f"    Small:  {self.small_object_ratio:.1f}%",
-            f"    Medium: {self.medium_object_ratio:.1f}%",
-            f"    Large:  {self.large_object_ratio:.1f}%",
+            "  Background:  {self.background_ratio:.1f}%",
+            "",
+            "  Object Sizes:",
+            "    Small:  {self.small_object_ratio:.1f}%",
+            "    Medium: {self.medium_object_ratio:.1f}%",
+            "    Large:  {self.large_object_ratio:.1f}%",
         ]
         if self.bias_warnings:
-            lines.append(f"")
-            lines.append(f"  Bias Warnings:")
+            lines.append("")
+            lines.append("  Bias Warnings:")
             for w in self.bias_warnings:
                 lines.append(f"    ! {w}")
         if self.recommendations:
-            lines.append(f"")
-            lines.append(f"  Recommendations:")
+            lines.append("")
+            lines.append("  Recommendations:")
             for r in self.recommendations:
                 lines.append(f"    -> {r}")
         return "\n".join(lines)
@@ -151,10 +151,10 @@ class DatasetIntelligence:
         annotations = {}  # image_id -> list of (class_id, w, h, area)
         if ann_dir.exists():
             for i, rec in enumerate(manifest):
-                label_file = ann_dir / f"{i:06d}.txt"
+                label_file = ann_dir / "{i:06d}.txt"
                 if label_file.exists() and label_file.stat().st_size > 0:
                     boxes = []
-                    with open(label_file) as f:
+                    with open(label_file, encoding="utf-8") as f:
                         for line in f:
                             line = line.strip()
                             if not line:
@@ -170,7 +170,7 @@ class DatasetIntelligence:
                                 except ValueError:
                                     pass
                     if boxes:
-                        annotations[rec.get("image_id", f"img_{i:06d}")] = boxes
+                        annotations[rec.get("image_id", "img_{i:06d}")] = boxes
 
         report.total_annotations = sum(len(v) for v in annotations.values())
         report.annotated_images = len(annotations)
@@ -201,7 +201,7 @@ class DatasetIntelligence:
                 report.camera_bias_score = round(ratio * 100, 1)
                 if ratio < 0.2:
                     report.bias_warnings.append(
-                        f"Camera imbalance: max={max_cam}, min={min_cam} (ratio={ratio:.2f})"
+                        "Camera imbalance: max={max_cam}, min={min_cam} (ratio={ratio:.2f})"
                     )
                     report.recommendations.append("Collect more data from underrepresented cameras")
         else:
@@ -231,7 +231,7 @@ class DatasetIntelligence:
         # Check time bias
         night_ratio = time_counter.get("night", 0) / max(sum(time_counter.values()), 1) * 100
         if night_ratio < 5 and sum(time_counter.values()) > 100:
-            report.bias_warnings.append(f"Very low night data: {night_ratio:.1f}%")
+            report.bias_warnings.append("Very low night data: {night_ratio:.1f}%")
             report.recommendations.append("Collect more night-scene data")
 
         # Step 6: Object Size Distribution
@@ -264,7 +264,7 @@ class DatasetIntelligence:
             max_cls = max(cls_values)
             min_cls = min(cls_values)
             if min_cls > 0 and max_cls / min_cls > 10:
-                report.bias_warnings.append(f"Class imbalance: max/min ratio = {max_cls/min_cls:.1f}")
+                report.bias_warnings.append("Class imbalance: max/min ratio = {max_cls/min_cls:.1f}")
                 report.recommendations.append("Apply class weights or collect more data for minority classes")
 
         return report
@@ -272,7 +272,7 @@ class DatasetIntelligence:
     def _load_manifest(self) -> List[Dict]:
         if not self.manifest_path.exists():
             return []
-        with open(self.manifest_path) as f:
+        with open(self.manifest_path, encoding="utf-8") as f:
             return [json.loads(l) for l in f if l.strip()]
 
     def save_report(self, report: IntelligenceReport, name: str = "latest") -> Path:

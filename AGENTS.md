@@ -1,6 +1,6 @@
 # raven-trainer (Raven Trainer)
 
-Raven AI 工业视觉数据资产与模型训练平台，raven-go 的训练侧配套：核心是**数据管线**（约 60% 代码）+ 模型训练/导出，产物为带元数据的 ONNX。技术栈：Python ≥ 3.11 + uv（`uv.lock`）+ Click CLI + FastAPI/uvicorn + Pydantic 2 + Math/loguru + PyTorch/Ultralytics 适配器（独立 pip 包：`raven-ultralytics` / `raven-mmdetection` / `raven-anomalib`）；`ui_src/` 为 React 19 + Vite + TypeScript 前端。
+Raven AI 工业视觉数据资产与模型训练平台，raven-go 的训练侧配套：核心是**数据管线**（约 60% 代码）+ 模型训练/导出，产物为带元数据的 ONNX。技术栈：Python ≥ 3.11 + uv（`uv.lock`）+ Click CLI + FastAPI/uvicorn + Pydantic 2 + Math/loguru + 训练适配器位于 `adapters/`（`raven-ultralytics` / `raven-mmdetection` / `raven-anomalib` / `raven-rfdetr`）；`ui_src/` 为 React 19 + Vite + TypeScript 前端。
 
 ## Commands
 - Install: `uv sync`（Python ≥ 3.11；或 `uv pip install -e .`）；`ui_src/` 单独 `npm install`
@@ -29,7 +29,7 @@ Raven AI 工业视觉数据资产与模型训练平台，raven-go 的训练侧�
 - 所有公共类 / 方法必须有 docstring（Google 风格）与完整类型注解
 - 配置用 Pydantic 模型 + YAML（`configs/` / `templates/`）；日志用 loguru，不用裸 print 刷日志
 - 插件开发：每个插件放 `plugins/<name>/`，提供 `setup()`，可注册 adapter / augmentation / exporter，**不得修改核心平台代码**
-- 训练适配器走独立 pip 包（raven-ultralytics 等），核心仓库不直接内嵌模型框架
+- 训练适配器作为仓库内 dapters/ 下的独立可分发包（raven-ultralytics 等），核心包不直接内嵌模型框架
 - **Dataset Recipe 是数据集的“源代码”**：维护 recipe 而非数据本身，保证同一 recipe 产出同一数据集
 - OBB 模型导出一律用 `scripts/export_obb_onnx.py` 包装脚本（统一 family imgsz / 内嵌 NMS / metadata），与 raven-go、raven-onnxruntime 的 OBB 约定对齐
 

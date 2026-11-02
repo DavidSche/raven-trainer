@@ -23,9 +23,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ...config import R
+from ...config import R, validate_name
 from ...asset_manager import AssetManager
 from ...data_asset.job import JobManager, JobStatus, JobType
+from ...data_asset.version import VersionManager
 
 router = APIRouter(tags=["pipeline"])
 
@@ -79,7 +80,7 @@ class PipelineProfileRequest(BaseModel):
 
 
 @router.get("/pipeline/profiles")
-async def list_pipeline_profiles():
+def list_pipeline_profiles():
     """列出所有 PipelineProfile。"""
     from ...data_asset.pipeline_profile import PipelineProfileManager
     mgr = PipelineProfileManager()
@@ -119,7 +120,7 @@ async def list_pipeline_profiles():
 
 
 @router.get("/pipeline/profiles/{name}")
-async def get_pipeline_profile(name: str):
+def get_pipeline_profile(name: str):
     """获取 PipelineProfile 详情。"""
     from ...data_asset.pipeline_profile import PipelineProfileManager
     mgr = PipelineProfileManager()
@@ -130,7 +131,7 @@ async def get_pipeline_profile(name: str):
 
 
 @router.post("/pipeline/profiles")
-async def create_pipeline_profile(req: PipelineProfileRequest):
+def create_pipeline_profile(req: PipelineProfileRequest):
     """创建 PipelineProfile。"""
     from ...data_asset.pipeline_profile import (
         PipelineProfile, PipelineProfileManager,
@@ -180,7 +181,7 @@ async def create_pipeline_profile(req: PipelineProfileRequest):
 
 
 @router.put("/pipeline/profiles/{name}")
-async def update_pipeline_profile(name: str, req: PipelineProfileRequest):
+def update_pipeline_profile(name: str, req: PipelineProfileRequest):
     """更新 PipelineProfile。"""
     from ...data_asset.pipeline_profile import (
         PipelineProfile, PipelineProfileManager,
@@ -231,7 +232,7 @@ async def update_pipeline_profile(name: str, req: PipelineProfileRequest):
 
 
 @router.delete("/pipeline/profiles/{name}")
-async def delete_pipeline_profile(name: str):
+def delete_pipeline_profile(name: str):
     """删除 PipelineProfile。"""
     from ...data_asset.pipeline_profile import PipelineProfileManager
     mgr = PipelineProfileManager()
@@ -243,7 +244,7 @@ async def delete_pipeline_profile(name: str):
 
 
 @router.post("/pipeline/profiles/{name}/run")
-async def run_pipeline_profile(name: str):
+def run_pipeline_profile(name: str):
     """执行 PipelineProfile（异步 Job 模式）。"""
     from ...data_asset.pipeline_profile import PipelineProfileManager
     mgr = PipelineProfileManager()
@@ -280,7 +281,7 @@ class FullPipelineRequest(BaseModel):
 
 
 @router.post("/pipeline/run")
-async def run_full_pipeline(req: FullPipelineRequest):
+def run_full_pipeline(req: FullPipelineRequest):
     """运行完整数据生命周期管道（异步 Job 模式）。"""
     job = _start_pipeline_job(req.model_dump())
     return job
@@ -288,6 +289,13 @@ async def run_full_pipeline(req: FullPipelineRequest):
 
 def _start_pipeline_job(params: dict, profile_name: str = "") -> dict:
     """Create and start a Pipeline Job with the given parameters."""
+    # Validate the dataset name before starting a background thread: a bad name
+    # used to fail several minutes into the run, inside the worker.
+    dataset_name = params.get("dataset_name", "")
+    if not dataset_name:
+        raise HTTPException(400, "dataset_name is required")
+    validate_name(dataset_name, "dataset name")
+
     jm = JobManager()
     config = {
         "dataset_name": params.get("dataset_name", ""),
@@ -381,6 +389,9 @@ def _pipeline_thread(job_id: str, params: dict):
             _log(f"[Step 1] Dataset already exists: {dataset_name}")
 
         # ── Step 2: Register Manifest ──
+        # Versions are append-only and cumulative: create a new snapshot through
+        # VersionManager instead of overwriting ``v1/manifest.jsonl`` (which both
+        # bypassed the version metadata and could destroy an existing snapshot).
         am = AssetManager()
         project_root = R.PROJECT_ROOT.resolve()
         records = []
@@ -399,19 +410,29 @@ def _pipeline_thread(job_id: str, params: dict):
                         storage_path=str(rel.as_posix()), source=src_dir.name))
                 except ValueError:
                     continue
+
+        version = ""
         if records:
-            manifest_path = R.dataset_manifest_path(dataset_name, "v1")
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            am.save_manifest(records, manifest_path)
-        _log(f"[Step 2] Manifest registered: {len(records)} images")
+            vm = VersionManager(R.dataset_dir(dataset_name))
+            snapshot = vm.create_version(
+                manifest_records=records,
+                description=f"Pipeline {job_id}",
+                source="pipeline",
+            )
+            version = snapshot.version
+            _log(f"[Step 2] Manifest registered: {len(records)} images -> {version}")
+        else:
+            _log("[Step 2] No source images found; manifest not created")
+
+        version_dir = R.dataset_version_dir(dataset_name, version) if version else None
 
         # ── Step 3: Auto-annotate (optional) ──
-        if auto_annotate and records:
+        if auto_annotate and records and version_dir is not None:
             from ultralytics import YOLO
             import cv2
             _log(f"[Step 3] Auto-annotating with {model_name}...")
             model = YOLO(model_name)
-            ann_dir = R.dataset_version_dir(dataset_name, "v1") / "annotations" / "converted" / "yolo"
+            ann_dir = version_dir / "annotations" / "converted" / "yolo"
             ann_dir.mkdir(parents=True, exist_ok=True)
             annotated = 0
             for i, rec in enumerate(records):
@@ -423,24 +444,24 @@ def _pipeline_thread(job_id: str, params: dict):
                     continue
                 results = model(img, verbose=False, conf=conf_threshold)
                 if results and results[0].boxes is not None:
-                    with open(ann_dir / f"{i:06d}.txt", "w") as lf:
+                    with open(ann_dir / "{i:06d}.txt", "w", encoding="utf-8") as lf:
                         for box, cls_id in zip(results[0].boxes.xyxyn, results[0].boxes.cls):
                             x1, y1, x2, y2 = box.tolist()
-                            lf.write(f"{int(cls_id)} {(x1+x2)/2:.6f} {(y1+y2)/2:.6f} {x2-x1:.6f} {y2-y1:.6f}\n")
+                            lf.write("{int(cls_id)} {(x1+x2)/2:.6f} {(y1+y2)/2:.6f} {x2-x1:.6f} {y2-y1:.6f}\n")
                 annotated += 1
             _log(f"  Annotated: {annotated} / {len(records)} images")
 
         # ── Step 4: Health Check ──
-        if records:
+        if records and version_dir is not None:
             try:
                 doctor = DatasetDoctor(R.dataset_dir(dataset_name))
-                ann_dir = R.dataset_version_dir(dataset_name, "v1") / "annotations" / "converted" / "yolo"
-                report = doctor.check(
+                ann_dir = version_dir / "annotations" / "converted" / "yolo"
+                health = doctor.check(
                     metadata_count=len(records),
-                    manifest_path=R.dataset_manifest_path(dataset_name, "v1"),
+                    manifest_path=version_dir / "manifest.jsonl",
                     ann_dir=ann_dir if ann_dir.exists() else None,
                 )
-                _log(f"[Step 4] Health score: {report.overall_score:.0f}/100")
+                _log("[Step 4] Health score: {health.overall_score:.0f}/100")
             except Exception as e:
                 _log(f"[Step 4] Health check skipped: {e}")
 
@@ -448,7 +469,7 @@ def _pipeline_thread(job_id: str, params: dict):
         if build_workspace and records:
             from ...dataset_pipeline import DatasetPipeline
             from ...data_asset.profile import BuildProfile
-            _log(f"[Step 5] Building workspace from recipe...")
+            _log("[Step 5] Building workspace from recipe...")
             profile = BuildProfile.detection_default(name=dataset_name)
             pipeline = DatasetPipeline()
             try:
@@ -461,20 +482,20 @@ def _pipeline_thread(job_id: str, params: dict):
                 _log(f"  Workspace: {result.train_count} train / {result.val_count} val / {result.test_count} test")
                 _log(f"  dataset.yaml: {result.dataset_yaml}")
             except FileNotFoundError:
-                _log(f"  [WARN] No recipe found. Create with 'dataset recipe --create' first.")
+                _log("  [WARN] No recipe found. Create with 'dataset recipe --create' first.")
             except FileExistsError:
-                _log(f"  [WARN] Workspace exists. Use force_build=True to overwrite.")
+                _log("  [WARN] Workspace exists. Use force_build=True to overwrite.")
 
         # ── Step 6: Record Lineage ──
         try:
-            store = LineageStore(R.dataset_dir(dataset_name))
-            store.add_node(LineageNode(
+            lineage_store = LineageStore(R.dataset_dir(dataset_name))
+            lineage_store.add_node(LineageNode(
                 id=f"pipeline_{job_id}",
                 type="pipeline",
                 name=f"Pipeline run {job_id}",
                 metadata={"source": "pipeline", "auto_annotate": auto_annotate, "build_workspace": build_workspace},
             ))
-            _log(f"[Step 6] Lineage recorded")
+            _log("[Step 6] Lineage recorded")
         except Exception as e:
             _log(f"[Step 6] Lineage skipped: {e}")
 
@@ -483,7 +504,7 @@ def _pipeline_thread(job_id: str, params: dict):
             from ...cli.new import ProjectScaffolder
             from ...cli.train import _do_train
 
-            _log(f"[Step 7] Creating training project...")
+            _log("[Step 7] Creating training project...")
             try:
                 proj_name = f"{dataset_name}_model"
                 scaffolder = ProjectScaffolder(
@@ -500,7 +521,7 @@ def _pipeline_thread(job_id: str, params: dict):
                         import shutil
                         shutil.copy2(str(ws_dataset_yaml), str(project_dir / "dataset.yaml"))
                 _log(f"  Project created: {proj_name}")
-                _log(f"  Starting training...")
+                _log("  Starting training...")
                 result = _do_train(
                     config_path=str(project_dir / "project.yaml"),
                     device=params.get("training_device", "cuda:0"),
@@ -510,12 +531,12 @@ def _pipeline_thread(job_id: str, params: dict):
                 )
                 _log(f"  Training complete. Model: {result.get('best_model', 'N/A')}")
             except FileExistsError:
-                _log(f"  [WARN] Training project already exists. Skipping.")
+                _log("  [WARN] Training project already exists. Skipping.")
             except Exception as e:
                 _log(f"  [WARN] Training skipped: {e}")
 
         # ── Done ──
-        _log(f"[Pipeline] Complete!")
+        _log("[Pipeline] Complete!")
         jm.save_result(job_id, {
             "dataset_name": dataset_name,
             "total_images": len(records) if records else 0,
@@ -538,7 +559,7 @@ def _pipeline_thread(job_id: str, params: dict):
 
 
 @router.get("/pipeline/storage-sources")
-async def list_storage_sources():
+def list_storage_sources():
     """列出 storage/images/ 下的图片源目录。"""
     sources = []
     storage = R.STORAGE_IMAGES
@@ -560,7 +581,7 @@ class RegisterManifestRequest(BaseModel):
 
 
 @router.post("/pipeline/register-manifest")
-async def register_manifest(req: RegisterManifestRequest):
+def register_manifest(req: RegisterManifestRequest):
     """扫描 storage/images/ 注册 Manifest 到数据集版本。"""
     am = AssetManager()
     project_root = R.PROJECT_ROOT.resolve()
@@ -601,12 +622,12 @@ class AutoAnnotateRequest(BaseModel):
 
 
 @router.post("/pipeline/auto-annotate")
-async def auto_annotate(req: AutoAnnotateRequest):
+def auto_annotate(req: AutoAnnotateRequest):
     """用 YOLO 模型自动标注未标记图片。"""
     manifest_path = R.dataset_manifest_path(req.dataset_name, req.version)
     if not manifest_path.exists():
         raise HTTPException(400, f"Manifest not found: {manifest_path}")
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = [json.loads(l) for l in f if l.strip()]
     if req.max_images > 0:
         manifest = manifest[:req.max_images]
@@ -628,14 +649,14 @@ async def auto_annotate(req: AutoAnnotateRequest):
             errors += 1
             continue
         results = model(img, verbose=False, conf=req.conf_threshold)
-        label_path = ann_dir / f"{i:06d}.txt"
-        with open(label_path, "w") as lf:
+        label_path = ann_dir / "{i:06d}.txt"
+        with open(label_path, "w", encoding="utf-8") as lf:
             for r in results:
                 if r.boxes is None:
                     continue
                 for box, cls_id in zip(r.boxes.xyxyn, r.boxes.cls):
                     x1, y1, x2, y2 = box.tolist()
-                    lf.write(f"{int(cls_id)} {(x1+x2)/2:.6f} {(y1+y2)/2:.6f} {x2-x1:.6f} {y2-y1:.6f}\n")
+                    lf.write("{int(cls_id)} {(x1+x2)/2:.6f} {(y1+y2)/2:.6f} {x2-x1:.6f} {y2-y1:.6f}\n")
         annotated += 1
     return {"status": "ok", "dataset": req.dataset_name, "version": req.version,
             "total_images": len(manifest), "annotated": annotated, "errors": errors,
@@ -648,7 +669,7 @@ class HealthCheckRequest(BaseModel):
 
 
 @router.post("/pipeline/health-check")
-async def health_check(req: HealthCheckRequest):
+def health_check(req: HealthCheckRequest):
     """对数据集版本执行健康检查。"""
     from ...data_asset import DatasetDoctor
     asset_dir = R.dataset_dir(req.dataset_name)
@@ -657,7 +678,7 @@ async def health_check(req: HealthCheckRequest):
     doctor = DatasetDoctor(asset_dir)
     manifest_path = R.dataset_manifest_path(req.dataset_name, req.version)
     metadata_count = 0
-    source_distribution = {}
+    source_distribution: Dict[str, int] = {}
     if manifest_path.exists():
         with open(manifest_path, encoding="utf-8") as f:
             for line in f:
@@ -684,7 +705,7 @@ async def health_check(req: HealthCheckRequest):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/pipeline/runs")
-async def list_pipeline_runs(limit: int = Query(50)):
+def list_pipeline_runs(limit: int = Query(50)):
     """列出所有 Pipeline Job 运行记录。"""
     jm = JobManager()
     jobs = [j for j in jm.list_jobs(limit=limit) if j.type == JobType.PIPELINE]
@@ -705,7 +726,7 @@ def _count_log_lines(log_path: str) -> int:
 
 
 @router.get("/pipeline/runs/{run_id}")
-async def get_pipeline_run(run_id: str):
+def get_pipeline_run(run_id: str):
     """获取 Pipeline 运行详情。"""
     jm = JobManager()
     job = jm.get(run_id)

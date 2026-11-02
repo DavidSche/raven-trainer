@@ -69,9 +69,11 @@ def _ffmpeg_extract_frame(video_path: str, frame_idx: int, fps: float, output_pa
 
 def _has_ffmpeg() -> bool:
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
-        return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        result = subprocess.run(
+            ["ffmpeg", "-version"], capture_output=True, timeout=5, check=False
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
 
 

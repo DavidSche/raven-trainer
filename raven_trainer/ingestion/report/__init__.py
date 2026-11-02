@@ -223,4 +223,3 @@ class ReportGenerator:
     def _bar(value: int, total: int, color: str) -> str:
         pct = (value / total * 100) if total > 0 else 0
         return f'<div class="bar" style="width:{pct:.1f}%;background:{color}"></div>'
-

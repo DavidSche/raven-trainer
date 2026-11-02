@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import re
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Query
@@ -10,6 +10,10 @@ from fastapi import APIRouter, HTTPException, Query
 from ...config import R
 
 router = APIRouter(tags=["reports"])
+
+# Report ids are a single path component; anything else (wildcards, ``..``,
+# separators) is rejected before it reaches a glob pattern.
+_REPORT_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
 
 REPORT_PATTERNS = [
     "**/train_report.html",
@@ -23,7 +27,7 @@ REPORT_PATTERNS = [
 
 
 @router.get("/reports")
-async def list_reports(limit: int = Query(50)):
+def list_reports(limit: int = Query(50)):
     """Scan data/ and projects/ directories for HTML reports."""
     reports: List[dict] = []
     scan_dirs = [R.DATA, R.PROJECT_ROOT / "projects"] if R.PROJECT_ROOT.exists() else []
@@ -46,8 +50,10 @@ async def list_reports(limit: int = Query(50)):
 
 
 @router.get("/reports/{report_id}")
-async def get_report(report_id: str):
+def get_report(report_id: str):
     """Navigate to a report by finding it from path patterns."""
+    if not _REPORT_ID_RE.match(report_id) or ".." in report_id:
+        raise HTTPException(400, f"Invalid report id: {report_id!r}")
     scan_dirs = [R.DATA, R.PROJECT_ROOT / "projects"] if R.PROJECT_ROOT.exists() else [R.DATA]
     for scan_root in scan_dirs:
         if not scan_root.exists():
@@ -56,7 +62,10 @@ async def get_report(report_id: str):
             for f in scan_root.glob(pattern):
                 rid = f"{f.parent.name}_{f.stem}"
                 if rid == report_id:
-                    return {"html": f.read_text(encoding="utf-8")}
+                    try:
+                        return {"html": f.read_text(encoding="utf-8")}
+                    except OSError as exc:
+                        raise HTTPException(404, f"Report '{report_id}' unreadable") from exc
     # Try to find by name in dataset report directories
     datasets_dir = R.DATASETS
     if datasets_dir.exists():
@@ -65,9 +74,11 @@ async def get_report(report_id: str):
                 reports_dir = ds_dir / "reports"
                 if reports_dir.exists():
                     for rf in reports_dir.glob(f"*{report_id.replace('intelligence_', '')}*"):
-                        if rf.exists():
-                            if rf.suffix == ".html":
-                                return {"html": rf.read_text(encoding="utf-8")}
-                            else:
+                        if rf.exists() and rf.is_file():
+                            try:
+                                if rf.suffix == ".html":
+                                    return {"html": rf.read_text(encoding="utf-8")}
                                 return {"html": f"<pre>{rf.read_text(encoding='utf-8')}</pre>"}
+                            except OSError as exc:
+                                raise HTTPException(404, f"Report '{report_id}' unreadable") from exc
     raise HTTPException(404, f"Report '{report_id}' not found")

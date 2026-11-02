@@ -56,7 +56,7 @@ class AssetManager:
             stem = Path(storage_path).stem
             image_id = f"img_{stem[:20]}"
 
-        record = {
+        record: Dict[str, Any] = {
             "image_id": image_id,
             "storage_path": storage_path,
         }
@@ -69,7 +69,7 @@ class AssetManager:
             if m:
                 y, mo, d, h, mi, s = m.groups()
                 capture_time = f"{y}-{mo}-{d}T{h}:{mi}:{s}"
-  
+
         # Auto-extract camera from filename if not provided
         if not camera:
             import re as _re

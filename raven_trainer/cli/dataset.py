@@ -15,12 +15,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import click
 
 from ..config import R
 from ..data_asset import (
-    AssetStore, DatasetRegistry, DataAsset,
+    AssetStore, DatasetRegistry, AnnotationTask,
     VersionManager, MetadataStore,
     TagManager, DatasetRecipe, RecipeManager,
     DatasetDoctor, LineageStore,
@@ -194,8 +195,8 @@ def dataset_stats(name: str):
         click.echo(f"[Dataset] '{name}' not found.")
         return
 
-    ms = MetadataStore(asset_dir / "metadata")
-    stats = ms.get_statistics()
+    with MetadataStore(asset_dir / "metadata") as ms:
+        stats = ms.get_statistics()
     if not stats:
         click.echo(f"[Dataset] No metadata for '{name}'. Add data first.")
         return
@@ -340,8 +341,8 @@ def dataset_doctor(name: str):
         return
 
     # Collect metadata stats
-    ms = MetadataStore(asset_dir / "metadata")
-    meta_count = ms.count()
+    with MetadataStore(asset_dir / "metadata") as ms:
+        meta_count = ms.count()
 
     # Collect source distribution from registry
     registry = _get_registry()
@@ -596,18 +597,18 @@ def dataset_task(name: str, create: str, list_tasks: bool, status: str, show: st
         click.echo(f"[Task] {show} status -> {status}")
 
     if show and not status:
-        task = tm.get_task(show)
-        if task:
-            click.echo(f"Task ID:   {task.task_id}")
-            click.echo(f"Platform:  {task.platform}")
-            click.echo(f"Name:      {task.name}")
-            click.echo(f"Status:    {task.status}")
-            click.echo(f"Created:   {task.created_at[:19]}")
-            if task.completed_at:
-                click.echo(f"Completed: {task.completed_at[:19]}")
-            click.echo(f"Images:    {task.image_count}")
-            if task.notes:
-                click.echo(f"Notes:     {task.notes}")
+        task_obj: Optional[AnnotationTask] = tm.get_task(show)
+        if task_obj:
+            click.echo(f"Task ID:   {task_obj.task_id}")
+            click.echo(f"Platform:  {task_obj.platform}")
+            click.echo(f"Name:      {task_obj.name}")
+            click.echo(f"Status:    {task_obj.status}")
+            click.echo(f"Created:   {task_obj.created_at[:19]}")
+            if task_obj.completed_at:
+                click.echo(f"Completed: {task_obj.completed_at[:19]}")
+            click.echo(f"Images:    {task_obj.image_count}")
+            if task_obj.notes:
+                click.echo(f"Notes:     {task_obj.notes}")
         else:
             click.echo(f"[Task] '{show}' not found.")
 
@@ -659,7 +660,7 @@ def dataset_build(name: str, output: str | None, val_size: float, test_size: flo
     # Generate dataset.yaml for YOLO
     import yaml
     from ..config import R as _R
-    dataset_yaml = {
+    dataset_yaml: Dict[str, Any] = {
         "path": str(out_dir.resolve().as_posix()),
         "train": "train/images",
         "val": "val/images",
@@ -670,7 +671,7 @@ def dataset_build(name: str, output: str | None, val_size: float, test_size: flo
     nc = 0
     for lbl in ann_dir.glob("*.txt"):
         if lbl.stat().st_size > 0:
-            with open(lbl) as f:
+            with open(lbl, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         cls_id = int(line.split()[0])
@@ -679,7 +680,7 @@ def dataset_build(name: str, output: str | None, val_size: float, test_size: flo
     dataset_yaml["names"] = {i: str(i) for i in range(nc)}
 
     yaml_path = out_dir / "dataset.yaml"
-    with open(yaml_path, "w") as f:
+    with open(yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(dataset_yaml, f, default_flow_style=False)
     click.echo(f"  dataset.yaml: {yaml_path}")
     click.echo(f"  Use this for training with: raven-train train {yaml_path}")
@@ -723,4 +724,3 @@ def dataset_misdata(name: str, collect: str, analyze: str, merge: bool, review: 
         count = mm.merge()
         click.echo(f"[Misdata] Merged {count} misdata images into '{name}'")
         click.echo(f"  Use 'raven-train dataset show {name}' to verify")
-

@@ -1,0 +1,30 @@
+[project]
+name = "raven-anomalib"
+version = "0.1.0"
+description = "Raven Trainer — Anomalib (anomaly detection) backend adapter"
+requires-python = ">=3.11"
+authors = [{ name = "Raven Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "raven-trainer>=0.2.0",
+    "anomalib[core,openvino]>=1.0",
+    "pillow>=10.0",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.3",
+    "openvino>=2024,<2026",
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
+
+[project.entry-points."raven_trainer.adapters"]
+anomalib = "raven_anomalib:RavenAnomalibAdapter"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["raven_anomalib*"]

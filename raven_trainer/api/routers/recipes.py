@@ -9,12 +9,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
 from ...data_asset.recipe import CatalogRecipeManager, DatasetRecipe, RecipeSource
-from ...config import R
 from pydantic import BaseModel
 
 router = APIRouter(tags=["recipes"])
@@ -62,7 +60,7 @@ def _to_response(recipe: DatasetRecipe) -> RecipeResponse:
 
 
 @router.get("/recipes")
-async def list_recipes():
+def list_recipes():
     """列出所有独立 Recipe。"""
     mgr = CatalogRecipeManager()
     names = mgr.list_recipes()
@@ -75,7 +73,7 @@ async def list_recipes():
 
 
 @router.get("/recipes/{name}")
-async def get_recipe(name: str):
+def get_recipe(name: str):
     """获取单个 Recipe 详情。"""
     mgr = CatalogRecipeManager()
     recipe = mgr.get_recipe(name)
@@ -85,7 +83,7 @@ async def get_recipe(name: str):
 
 
 @router.post("/recipes")
-async def create_recipe(req: CreateRecipeRequest):
+def create_recipe(req: CreateRecipeRequest):
     """创建新 Recipe。"""
     mgr = CatalogRecipeManager()
     existing = mgr.get_recipe(req.name)
@@ -115,7 +113,7 @@ async def create_recipe(req: CreateRecipeRequest):
 
 
 @router.put("/recipes/{name}")
-async def update_recipe(name: str, req: CreateRecipeRequest):
+def update_recipe(name: str, req: CreateRecipeRequest):
     """更新已有 Recipe。"""
     mgr = CatalogRecipeManager()
     existing = mgr.get_recipe(name)
@@ -145,7 +143,7 @@ async def update_recipe(name: str, req: CreateRecipeRequest):
 
 
 @router.delete("/recipes/{name}")
-async def delete_recipe(name: str):
+def delete_recipe(name: str):
     """删除 Recipe。"""
     _validate_safe_name(name, "recipe name")
     mgr = CatalogRecipeManager()
@@ -157,7 +155,7 @@ async def delete_recipe(name: str):
 
 
 @router.post("/recipes/{name}/build")
-async def build_from_standalone_recipe(name: str, force: bool = False):
+def build_from_standalone_recipe(name: str, force: bool = False):
     """从独立 Recipe 构建训练工作区（异步 Job 模式）。"""
     from ...data_asset.profile import BuildProfile
     from ...data_asset.job import JobManager, JobStatus, JobType
@@ -250,7 +248,7 @@ import json as _json
 from pathlib import Path as _Path
 
 @router.get("/workspaces")
-async def list_workspaces():
+def list_workspaces():
     """列出所有已构建的训练工作区。"""
     from ...config import R as _R
     ws_dir = _R.WORKSPACE
@@ -285,7 +283,7 @@ async def list_workspaces():
 
 
 @router.delete("/workspaces/{name}")
-async def delete_workspace(name: str):
+def delete_workspace(name: str):
     """删除训练工作区。"""
     _validate_safe_name(name, "workspace name")
     from ...config import R as _R
@@ -293,9 +291,7 @@ async def delete_workspace(name: str):
     ws_root = _R.WORKSPACE.resolve()
     ws_dir = (_R.WORKSPACE / name).resolve()
     # Defense-in-depth: ensure resolved path is still under WORKSPACE
-    try:
-        ws_dir.relative_to(ws_root)
-    except ValueError:
+    if not ws_dir.is_relative_to(ws_root):
         raise HTTPException(400, "Path traversal detected")
     if not ws_dir.exists():
         raise HTTPException(404, f"Workspace '{name}' not found")

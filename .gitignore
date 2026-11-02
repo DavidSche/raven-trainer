@@ -36,3 +36,5 @@ raw_index.json
 # OS
 .DS_Store
 Thumbs.db
+ui_src/tsconfig.tsbuildinfo
+*.rar

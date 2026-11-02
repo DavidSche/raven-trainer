@@ -87,6 +87,10 @@ class LineageStore:
             self._save()
         return False
 
+    def get_graph(self) -> Dict[str, Any]:
+        """Return the whole lineage graph (all nodes and edges)."""
+        return {"nodes": list(self._nodes.values()), "edges": list(self._edges)}
+
     def get_lineage(self, node_id: str) -> Dict[str, List[Dict]]:
         """获取指定节点的完整血缘链。
 
@@ -185,6 +189,8 @@ class LineageStore:
                 if edge.target_id == current:
                     parent_id = edge.source_id
                     break
+            if parent_id is None:
+                break
             current = parent_id
         return list(reversed(chain))
 

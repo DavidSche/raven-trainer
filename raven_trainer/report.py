@@ -1,7 +1,6 @@
 import html as _html
-import json, yaml
+import json
 from pathlib import Path
-from raven_trainer.config import R
 
 # This script will be called after training to generate a training report
 # It will be integrated into train.py
@@ -39,15 +38,15 @@ def _esc(val) -> str:
 def generate_training_report(exp_path, project_name, config, metrics, model_path, onnx_path, output_path):
     """Generate an HTML training report after training completes."""
     exp_name = Path(exp_path).stem
-    
+
     metrics_html = ""
     if metrics:
         metrics_html = '<div class="stats-grid">'
         for k, v in sorted(metrics.items()):
             if isinstance(v, (int, float)):
-                metrics_html += f'<div class="stat-card"><div class="value">{v:.4f}</div><div class="label">{_esc(k)}</div></div>'
+                metrics_html += '<div class="stat-card"><div class="value">{v:.4f}</div><div class="label">{_esc(k)}</div></div>'
         metrics_html += "</div>"
-    
+
     config_html = '<div class="card"><h2>Training Configuration</h2><table>'
     for k, v in sorted(config.items()):
         if k == "dataset":
@@ -58,20 +57,20 @@ def generate_training_report(exp_path, project_name, config, metrics, model_path
         else:
             config_html += f'<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>'
     config_html += "</table></div>"
-    
+
     artifacts_html = '<div class="card"><h2>Artifacts</h2><table>'
     artifacts_html += f'<tr><td>Experiment</td><td>{_esc(exp_path)}</td></tr>'
     artifacts_html += f'<tr><td>Model (best.pt -> models/)</td><td>{_esc(model_path or "N/A")}</td></tr>'
     artifacts_html += f'<tr><td>ONNX</td><td>{_esc(onnx_path or "N/A")}</td></tr>'
     artifacts_html += "</table></div>"
-    
+
     body = metrics_html + config_html + artifacts_html
     html = TRAIN_REPORT_HTML.format(
         title=_esc(f"Training Report - {project_name}"),
         subtitle=_esc(f"{exp_name} | generated automatically"),
         body=body,
     )
-    
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -83,18 +82,18 @@ def generate_eval_report(eval_path, project_name, metrics, model_used, dataset_u
     metrics_html = '<div class="stats-grid">'
     for k, v in sorted(metrics.items()):
         if isinstance(v, (int, float)):
-            metrics_html += f'<div class="stat-card"><div class="value">{v:.4f}</div><div class="label">{_esc(k)}</div></div>'
+            metrics_html += '<div class="stat-card"><div class="value">{v:.4f}</div><div class="label">{_esc(k)}</div></div>'
     metrics_html += "</div>"
-    
+
     info_html = f'<div class="card"><h2>Evaluation Info</h2><table><tr><td>Model</td><td>{_esc(model_used)}</td></tr><tr><td>Dataset</td><td>{_esc(dataset_used)}</td></tr></table></div>'
-    
+
     body = metrics_html + info_html
     html = TRAIN_REPORT_HTML.format(
         title=_esc(f"Evaluation Report - {project_name}"),
         subtitle=_esc("generated automatically"),
         body=body,
     )
-    
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -103,20 +102,20 @@ def generate_eval_report(eval_path, project_name, metrics, model_used, dataset_u
 
 def generate_export_report(project_name, model_name, format_type, output_path, metadata, out_file):
     """Generate an HTML export report."""
-    info = f'<div class="card"><h2>Export Info</h2><table>'
+    info = '<div class="card"><h2>Export Info</h2><table>'
     info += f'<tr><td>Model</td><td>{_esc(model_name)}</td></tr>'
     info += f'<tr><td>Format</td><td>{_esc(format_type)}</td></tr>'
     info += f'<tr><td>Output</td><td>{_esc(out_file)}</td></tr>'
     info += f'<tr><td>SHA256</td><td>{_esc(metadata.get("sha256", "N/A"))}</td></tr>'
-    info += f'</table></div>'
-    
+    info += '</table></div>'
+
     body = info
     html = TRAIN_REPORT_HTML.format(
         title=_esc(f"Export Report - {project_name}"),
         subtitle=_esc("generated automatically"),
         body=body,
     )
-    
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)

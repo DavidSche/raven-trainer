@@ -30,7 +30,7 @@ def ingest_scan(raw_root: str, output: str | None):
     for s in sources:
         meta = s.metadata
         if meta:
-            click.echo(f"  {meta.source_name:20s}  {meta.source_type:10s}  {meta.resolution or '?':12s}  {meta.total_frames or '?':>8} frames")
+            click.echo("  {meta.source_name:20s}  {meta.source_type:10s}  {meta.resolution or '?':12s}  {meta.total_frames or '?':>8} frames")
 
     import json
     out_path = Path(output) if output else R.CACHE / "raw_index.json"
@@ -166,7 +166,7 @@ def ingest_run(
         click.echo(f"\n[Ingestion] Done. {report.total_after_dedup} frames kept.")
         click.echo(f"[Ingestion] Output: {out_path}")
         click.echo(f"[Ingestion] Job: {job.job_id}")
-        click.echo(f"[Ingestion] Use 'raven-train dataset list' to see registered assets.")
+        click.echo("[Ingestion] Use 'raven-train dataset list' to see registered assets.")
 
     except Exception as e:
         jm.append_log(job.job_id, f"Ingestion FAILED: {e}")
@@ -204,7 +204,7 @@ def profile_list():
     if not profiles:
         click.echo("[Ingestion Profile] No profiles found.")
         return
-    click.echo(f"{'NAME':25s} {'SOURCES':10s} {'PIPELINE':35s} {'TARGET':20s}")
+    click.echo("{'NAME':25s} {'SOURCES':10s} {'PIPELINE':35s} {'TARGET':20s}")
     click.echo("-" * 90)
     for name in profiles:
         p = mgr.get_profile(name)
@@ -212,7 +212,7 @@ def profile_list():
             src_count = str(len(p.sources))
             pipe = ",".join(p.pipeline)
             target = p.target_dataset or "-"
-            click.echo(f"{name:25s} {src_count:10s} {pipe:35s} {target:20s}")
+            click.echo("{name:25s} {src_count:10s} {pipe:35s} {target:20s}")
 
 
 @cmd_profile.command(name="show")
@@ -336,7 +336,7 @@ def profile_run(name, output, no_register):
         jm.append_log(job.job_id, f"Done. {report.total_after_dedup} frames kept.")
         jm.update_status(job.job_id, JobStatus.COMPLETED)
 
-        click.echo(f"\n[Ingestion Profile] Done.")
+        click.echo("\n[Ingestion Profile] Done.")
         click.echo(f"  Kept: {report.total_after_dedup} frames")
         click.echo(f"  Job: {job.job_id}")
 

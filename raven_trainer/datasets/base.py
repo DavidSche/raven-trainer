@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -98,7 +98,9 @@ class DatasetConfig:
     def from_yaml(cls, path: str | Path) -> "DatasetConfig":
         """Load dataset configuration from a YAML file."""
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Dataset config must be a mapping, got {type(data).__name__}")
         # Coerce string values to their enum types so that to_dict() can call
         # .value on them without AttributeError. Also ignore unknown fields so
         # YAML files with extra metadata (author, notes, etc.) don't crash.
@@ -107,7 +109,7 @@ class DatasetConfig:
         if isinstance(data.get("format"), str):
             data["format"] = AnnotationFormat(data["format"])
         # Filter to known dataclass fields to tolerate extra YAML keys
-        known = set(cls.__dataclass_fields__.keys())  # type: ignore[attr-defined]
+        known = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)
 

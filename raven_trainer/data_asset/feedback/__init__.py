@@ -7,18 +7,22 @@
   customer_case    客户提供的补充数据
 """
 
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
-from ...config import R
+from ...config import R, validate_name
 from ...asset_manager import AssetManager
 
 FEEDBACK_CATEGORIES = ["false_positive", "false_negative", "hard_case", "customer_case"]
 
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
+
+
 class FeedbackManager:
     def __init__(self, dataset_name: str):
-        self.dataset_name = dataset_name
-        self.asset_dir = R.dataset_dir(dataset_name)
+        self.dataset_name = validate_name(dataset_name, "dataset name")
+        self.asset_dir = R.dataset_dir(self.dataset_name)
         self.feedback_dir = self.asset_dir / "feedback"
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
         for cat in FEEDBACK_CATEGORIES:
@@ -31,14 +35,19 @@ class FeedbackManager:
         cat_dir = self.feedback_dir / category
         count = 0
         for f in src.iterdir():
-            if f.suffix.lower() in (".jpg",".jpeg",".png"):
+            if f.suffix.lower() in IMAGE_SUFFIXES:
                 dst = cat_dir / f.name
                 if not dst.exists():
-                    if copy: shutil.copy2(str(f), str(dst))
+                    if copy:
+                        shutil.copy2(str(f), str(dst))
                     else:
-                        try: import os; os.link(str(f), str(dst))
-                        except: shutil.copy2(str(f), str(dst))
-                count += 1
+                        try:
+                            os.link(str(f), str(dst))
+                        except OSError:
+                            shutil.copy2(str(f), str(dst))
+                    # Only count files that were actually collected; previously
+                    # already-present files inflated the reported total.
+                    count += 1
         return count
 
     def analyze(self, model_path, conf_threshold=0.25):
@@ -78,40 +87,113 @@ class FeedbackManager:
                 results.append({"filename": f.name, "category": cat, "status": status, "path": str(f)})
         return results
 
+    def _marker(self, category: str, filename: str) -> Path:
+        """Path of the feedback image inside a category directory."""
+        if category not in FEEDBACK_CATEGORIES:
+            raise ValueError(f"Unknown category '{category}'")
+        return self.feedback_dir / category / filename
+
     def approve(self, category, filename):
-        (self.feedback_dir / category / "_approved").mkdir(exist_ok=True)
-        ((self.feedback_dir / category / "_approved") / filename).write_text("")
+        """Mark a feedback image as approved (required for ``merge``)."""
+        item = self._marker(category, filename)
+        if not item.is_file():
+            raise FileNotFoundError(f"Feedback item not found: {category}/{filename}")
+        marker_dir = item.parent / "_approved"
+        marker_dir.mkdir(exist_ok=True)
+        (marker_dir / filename).write_text("", encoding="utf-8")
 
     def reject(self, category, filename):
-        (self.feedback_dir / category / "_reviewed").mkdir(exist_ok=True)
-        ((self.feedback_dir / category / "_reviewed") / filename).write_text("")
+        """Mark a feedback image as rejected."""
+        item = self._marker(category, filename)
+        if not item.is_file():
+            raise FileNotFoundError(f"Feedback item not found: {category}/{filename}")
+        marker_dir = item.parent / "_reviewed"
+        marker_dir.mkdir(exist_ok=True)
+        (marker_dir / filename).write_text("", encoding="utf-8")
+
+    def _current_records(self) -> List[dict]:
+        """Load the manifest of the newest version (versions are cumulative)."""
+        import json
+
+        from ..version import VersionManager
+
+        vm = VersionManager(self.asset_dir)
+        versions = vm.list_versions()
+        if not versions:
+            return []
+        manifest = vm.get_version_dir(versions[0].version) / "manifest.jsonl"
+        if not manifest.exists():
+            return []
+        records: List[dict] = []
+        with open(manifest, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict):
+                    records.append(rec)
+        return records
 
     def merge(self, version=""):
-        from ..version import VersionManager, VersionSnapshot
+        """Create a new dataset version from approved feedback images.
+
+        Versions are cumulative snapshots: the current version's manifest is
+        carried over and approved feedback images are appended. Records are
+        de-duplicated by ``storage_path`` so merging twice is idempotent.
+        """
+        from ..version import VersionManager
         from ..registry import AssetStore, DatasetRegistry
+
         vm = VersionManager(self.asset_dir)
         store = AssetStore(R.DATASETS)
         registry = DatasetRegistry(store)
         asset = registry.get(self.dataset_name)
-        if not asset: raise ValueError(f"Dataset '{self.dataset_name}' not found")
+        if not asset:
+            raise ValueError(f"Dataset '{self.dataset_name}' not found")
         am = AssetManager()
-        records = []
+
+        records = self._current_records()
+        seen = {rec.get("storage_path", "") for rec in records}
+        added = 0
         for cat in FEEDBACK_CATEGORIES:
             cat_dir = self.feedback_dir / cat
             approved = cat_dir / "_approved"
+            if not cat_dir.exists():
+                continue
             for f in sorted(cat_dir.iterdir()):
-                if f.name.startswith("_"): continue
-                if approved.exists() and (approved / f.name).exists():
-                    rel = f.relative_to(R.PROJECT_ROOT)
-                    records.append(am.create_manifest_record(storage_path=str(rel.as_posix()), source=f"feedback_{cat}"))
-        if not records: return 0
-        version_str = version or f"v{len(vm.list_versions()) + 1}"
-        am.save_manifest(records, R.dataset_version_dir(self.dataset_name, version_str) / "manifest.jsonl")
-        snap = VersionSnapshot(version=version_str, parent_version=asset.current_version or None, image_count=len(records), source="feedback")
-        snap.save(R.dataset_version_dir(self.dataset_name, version_str) / "snapshot.yaml")
-        asset.current_version = version_str
+                if f.name.startswith("_"):
+                    continue
+                if not (approved.exists() and (approved / f.name).exists()):
+                    continue
+                try:
+                    storage_path = f.resolve().relative_to(R.PROJECT_ROOT).as_posix()
+                except ValueError:
+                    # Custom RAVEN_DATA root outside the project: store an
+                    # absolute path instead of crashing the merge.
+                    storage_path = str(f.resolve())
+                if storage_path in seen:
+                    continue
+                seen.add(storage_path)
+                records.append(
+                    am.create_manifest_record(
+                        storage_path=storage_path, source=f"feedback_{cat}"
+                    )
+                )
+                added += 1
+        if added == 0:
+            return 0
+        snapshot = vm.create_version(
+            manifest_records=records,
+            description=f"Feedback merge (+{added} images)",
+            source="feedback",
+            version_tag=version,
+        )
+        asset.current_version = snapshot.version
         asset.version_count = len(vm.list_versions())
-        asset.total_images += len(records)
+        asset.total_images = snapshot.image_count
         registry.update(asset)
-        return len(records)
-
+        return added

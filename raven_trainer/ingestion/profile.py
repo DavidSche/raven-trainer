@@ -21,8 +21,20 @@ from typing import Any, Dict, List, Optional
 import yaml
 import os
 
-from .core import QualityFilterConfig, DedupConfig, SamplingStrategy
+from ..config import validate_name
 from .sampling.core import DecodeConfig
+
+
+def _filter_kwargs(dc_type: type, values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep only keyword arguments accepted by ``dc_type``'s dataclass fields.
+
+    Profiles are user-editable YAML; unknown or stale keys must be ignored
+    instead of raising ``TypeError`` in the middle of an ingestion run.
+    """
+    import dataclasses
+
+    allowed = {f.name for f in dataclasses.fields(dc_type)}
+    return {k: v for k, v in (values or {}).items() if k in allowed}
 
 
 @dataclass
@@ -115,7 +127,7 @@ class IngestionProfile:
 
     @classmethod
     def from_dict(cls, data: dict) -> "IngestionProfile":
-        sources = [SourceRef(**s) for s in data.get("sources", [])]
+        sources = [SourceRef(**_filter_kwargs(SourceRef, s)) for s in data.get("sources", [])]
         return cls(
             name=data["name"],
             version=data.get("version", "1.0"),
@@ -173,19 +185,23 @@ class IngestionProfileManager:
             f.stem for f in self.profiles_root.glob("*.yaml")
         )
 
+    def _profile_path(self, name: str) -> Path:
+        """Resolve a profile YAML path, rejecting unsafe names."""
+        return self.profiles_root / f"{validate_name(name, 'profile name')}.yaml"
+
     def get_profile(self, name: str) -> Optional[IngestionProfile]:
-        path = self.profiles_root / f"{name}.yaml"
+        path = self._profile_path(name)
         if path.exists():
             return IngestionProfile.from_yaml(path)
         return None
 
     def save_profile(self, profile: IngestionProfile) -> Path:
-        path = self.profiles_root / f"{profile.name}.yaml"
+        path = self._profile_path(profile.name)
         profile.save(path)
         return path
 
     def delete_profile(self, name: str) -> None:
-        path = self.profiles_root / f"{name}.yaml"
+        path = self._profile_path(name)
         if path.exists():
             path.unlink()
 
@@ -198,8 +214,10 @@ class IngestionProfileManager:
         from .pipeline import IngestionPipeline
         from .core import QualityFilterConfig, DedupConfig
 
-        quality = QualityFilterConfig(**profile.quality)
-        dedup = DedupConfig(**profile.dedup)
+        # Unknown keys in a hand-edited YAML must not crash ingestion: keep only
+        # the fields the dataclasses actually accept.
+        quality = QualityFilterConfig(**_filter_kwargs(QualityFilterConfig, profile.quality))
+        dedup = DedupConfig(**_filter_kwargs(DedupConfig, profile.dedup))
 
         # Resolve raw root from first source's parent
         from ..config import R as _R
@@ -208,9 +226,22 @@ class IngestionProfileManager:
             # Compute the common parent of all source paths
             # so RawImporter.scan() can find all subdirectories/files
             source_parents = [Path(s.path).parent for s in profile.sources]
-            common = Path(os.path.commonpath(source_parents)) if len(source_parents) > 1 else source_parents[0]
-            raw_root = _R.STORAGE / common
-            if not raw_root.exists():
+            try:
+                common = (
+                    Path(os.path.commonpath([str(p) for p in source_parents]))
+                    if len(source_parents) > 1
+                    else source_parents[0]
+                )
+            except ValueError:
+                # Different drives (Windows) — fall back to the storage root.
+                common = Path(".")
+            candidate = (_R.STORAGE / common).resolve()
+            storage_root = _R.STORAGE.resolve()
+            # Never let a profile point outside storage/.
+            if candidate == storage_root or storage_root in candidate.parents:
+                if candidate.exists():
+                    raw_root = candidate
+            else:
                 raw_root = _R.STORAGE
 
         pipeline = IngestionPipeline(

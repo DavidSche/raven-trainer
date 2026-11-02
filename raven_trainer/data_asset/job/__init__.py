@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +31,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ...config import R
+
+# ``job_id`` is used to build filesystem paths; only accept IDs this module can
+# create (``<job_type>_<4+ digits>``) so API input cannot escape ``data/jobs``.
+_JOB_ID_RE = re.compile(r"^(?:ingest|train|eval|export|build|pipeline)_\d{4,}$")
 
 
 class JobStatus(str, Enum):
@@ -114,7 +119,6 @@ class JobManager:
         Job ID 序号基于该类型已有最大序号 +1（而非 len(existing)+1），
         避免删除任务后再创建时与历史 ID 冲突。
         """
-        import re as _re
         prefix = f"{job_type.value}_"
         max_seq = 0
         if self.jobs_dir.exists():
@@ -122,7 +126,7 @@ class JobManager:
                 # Skip *_result.json sidecars
                 if f.stem.endswith("_result"):
                     continue
-                m = _re.match(rf"^{prefix}(\d+)\.json$", f.name)
+                m = re.match(rf"^{re.escape(prefix)}(\d+)\.json$", f.name)
                 if m:
                     seq_num = int(m.group(1))
                     if seq_num > max_seq:
@@ -156,6 +160,8 @@ class JobManager:
         return job
 
     def get(self, job_id: str) -> Optional[Job]:
+        if not _JOB_ID_RE.match(job_id or ""):
+            return None
         path = self.jobs_dir / f"{job_id}.json"
         if path.exists():
             return Job.load(path)
@@ -163,9 +169,13 @@ class JobManager:
 
     def list_jobs(self, status: Optional[JobStatus] = None, limit: int = 50) -> List[Job]:
         jobs = []
-        for f in sorted(self.jobs_dir.glob("*.json"), reverse=True)[:limit]:
+        # Filter *before* applying the limit, otherwise corrupt/unrelated JSON
+        # files (or a status filter) would silently shrink the result set.
+        for f in sorted(self.jobs_dir.glob("*.json"), reverse=True):
             # Skip result/log files — they match *.json but aren't Job records
             if f.stem.endswith("_result") or f.stem.endswith("_log"):
+                continue
+            if not _JOB_ID_RE.match(f.stem):
                 continue
             try:
                 job = Job.load(f)
@@ -174,6 +184,8 @@ class JobManager:
                 continue
             if status is None or job.status == status:
                 jobs.append(job)
+                if len(jobs) >= limit:
+                    break
         return jobs
 
     def update_status(self, job_id: str, status: JobStatus, error: str = "") -> Job:
@@ -183,7 +195,7 @@ class JobManager:
         job.status = status
         if status == JobStatus.RUNNING and not job.started_at:
             job.started_at = datetime.now().isoformat()
-        if status in (JobStatus.COMPLETED, JobStatus.FAILED):
+        if status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
             job.finished_at = datetime.now().isoformat()
         if error:
             job.error = error

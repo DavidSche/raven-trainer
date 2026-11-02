@@ -87,7 +87,7 @@ class AnnotationManager:
 
             stats["annotated_images"] += 1
             classes_in_image = set()
-            with open(lf) as f:
+            with open(lf, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -127,7 +127,7 @@ class AnnotationManager:
                 continue
 
             line_no = 0
-            with open(lf) as f:
+            with open(lf, encoding="utf-8") as f:
                 for line in f:
                     line_no += 1
                     line = line.strip()
@@ -169,7 +169,7 @@ class AnnotationManager:
         converter = converters.get(converter_key)
         if converter is None:
             raise ValueError(f"Unsupported conversion: {source_format} → {target_format}")
-        return converter(**kwargs)
+        return converter(**kwargs)  # type: ignore[operator]
 
     def _yolo_to_cvat_xml(self, image_width: int = 1920, image_height: int = 1080, label_map: Optional[Dict[int, str]] = None) -> int:
         """YOLO TXT → CVAT XML。"""
@@ -183,14 +183,14 @@ class AnnotationManager:
         manifest_path = R.dataset_manifest_path(self.dataset_name, self.version)
         image_paths = []
         if manifest_path.exists():
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     rec = json.loads(line)
-                    p = R.resolve_storage_path(rec.get("storage_path", ""))
-                    if p and p.exists():
+                    p = R.try_resolve_storage_path(rec.get("storage_path", ""))
+                    if p is not None and p.exists():
                         image_paths.append(p)
 
         exporter = CvatExporter(label_map or {})
@@ -215,14 +215,14 @@ class AnnotationManager:
         manifest_path = R.dataset_manifest_path(self.dataset_name, self.version)
         image_dir = None
         if manifest_path.exists():
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     rec = json.loads(line)
-                    p = R.resolve_storage_path(rec.get("storage_path", ""))
-                    if p and p.exists():
+                    p = R.try_resolve_storage_path(rec.get("storage_path", ""))
+                    if p is not None and p.exists():
                         image_dir = p.parent
                         break
 
@@ -231,4 +231,3 @@ class AnnotationManager:
 
         result = importer.cvat_xml_to_yolo(cvat_xml, image_dir, yolo_dir)
         return len(result)
-

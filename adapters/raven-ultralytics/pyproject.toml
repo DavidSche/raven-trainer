@@ -1,0 +1,24 @@
+[project]
+name = "raven-ultralytics"
+version = "0.1.0"
+description = "Raven Trainer — Ultralytics (YOLO) backend adapter"
+requires-python = ">=3.11"
+authors = [{ name = "Raven Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "raven-trainer>=0.2.0",
+    "ultralytics>=8.2",
+]
+
+[project.entry-points."raven_trainer.adapters"]
+ultralytics = "raven_ultralytics:RavenUltralyticsAdapter"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["raven_ultralytics*"]

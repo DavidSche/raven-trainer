@@ -48,10 +48,10 @@ def _save_experiment(
 
     existing = sorted(exp_dir.glob("exp_*.yaml"))
     seq = len(existing) + 1
-    exp_path = exp_dir / f"exp_{seq:03d}.yaml"
+    exp_path = exp_dir / "exp_{seq:03d}.yaml"
 
     record = {
-        "experiment": f"exp_{seq:03d}",
+        "experiment": "exp_{seq:03d}",
         "created_at": datetime.now().isoformat(),
         "config": config,
         "results": results or {},
@@ -155,11 +155,11 @@ def _do_train(
     project_dir = cfg_path.parent
 
     if is_project:
-        with open(cfg_path) as f:
+        with open(cfg_path, encoding="utf-8") as f:
             manifest = yaml.safe_load(f) or {}
-        with open(project_dir / "train.yaml") as f:
+        with open(project_dir / "train.yaml", encoding="utf-8") as f:
             train_cfg = yaml.safe_load(f) or {}
-        with open(project_dir / "dataset.yaml") as f:
+        with open(project_dir / "dataset.yaml", encoding="utf-8") as f:
             dataset_cfg = yaml.safe_load(f) or {}
         backend_name = manifest.get("backend", {}).get("name", "ultralytics")
         model_name = manifest.get("backend", {}).get("model", "yolo26n")
@@ -167,7 +167,7 @@ def _do_train(
         project_name = manifest.get("name", project_dir.name)
     else:
         train_cfg = {}
-        with open(cfg_path) as f:
+        with open(cfg_path, encoding="utf-8") as f:
             dataset_cfg = yaml.safe_load(f) or {}
         backend_name = "ultralytics"
         model_name = "yolo26n"
@@ -246,7 +246,7 @@ def _do_train(
     adapter_cls = load_adapter(backend_name)
     adapter = adapter_cls(train_cfg)
 
-    log_func(f"[Train] Starting training...")
+    log_func("[Train] Starting training...")
 
     try:
         result = adapter.train(
@@ -257,12 +257,12 @@ def _do_train(
             cancel_event=cancel_event,
         )
     except KeyboardInterrupt:
-        log_func(f"[Train] Training cancelled.")
+        log_func("[Train] Training cancelled.")
         return {"status": "cancelled", "metrics": {}, "elapsed_seconds": round(_time.time() - t_start, 1)}
 
-    log_func(f"[Train] Training complete.")
+    log_func("[Train] Training complete.")
     elapsed = _time.time() - t_start
-    log_func(f"[Train] Elapsed: {elapsed:.1f}s")
+    log_func("[Train] Elapsed: {elapsed:.1f}s")
 
     # Extract metrics from adapter
     metrics = adapter._extract_metrics(result, "") if hasattr(adapter, "_extract_metrics") else {}
@@ -301,7 +301,7 @@ def _do_train(
         log_func(f"[Train] Model saved: {dst}")
 
         meta_path = dst.with_suffix(".metadata.yaml")
-        with open(meta_path, "w") as f:
+        with open(meta_path, "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "model": model_name,
@@ -353,7 +353,7 @@ def _do_train(
     if register_to_platform and onnx_path:
         try:
             from ..integration.raven_go import register_model_to_platform
-            log_func(f"[Train] Registering model to raven-go platform...")
+            log_func("[Train] Registering model to raven-go platform...")
             reg_result = register_model_to_platform(
                 onnx_path=onnx_path,
                 model_name=model_name,
@@ -372,7 +372,7 @@ def _do_train(
             log_func(f"[Train] Platform registration skipped: {e}")
 
     # Collect reproducibility metadata
-    reproducibility = {}
+    reproducibility: Dict[str, Any] = {}
     try:
         import subprocess as _sp
         r = _sp.run(
@@ -405,7 +405,7 @@ def _do_train(
     }
     try:
         if data_path.exists():
-            ds_cfg = yaml.safe_load(open(data_path))
+            ds_cfg = yaml.safe_load(open(data_path, encoding="utf-8"))
             dataset_snapshot["train"] = ds_cfg.get("train", "")
             dataset_snapshot["val"] = ds_cfg.get("val", "")
             dataset_snapshot["nc"] = ds_cfg.get("nc", 0)
@@ -468,7 +468,7 @@ def _do_train(
     except Exception as e:
         log_func(f"[Train] Report generation skipped: {e}")
 
-    log_func(f"[Train] Done.")
+    log_func("[Train] Done.")
     return result_dict
 
 
@@ -593,9 +593,9 @@ def cmd_train(
     train_extra_kwargs: dict = {}
     if resume:
         train_extra_kwargs["resume"] = True
-        click.echo(f"[Train] Resume from last checkpoint: enabled")
+        click.echo("[Train] Resume from last checkpoint: enabled")
 
-    click.echo(f"[Train] Starting training...")
+    click.echo("[Train] Starting training...")
     try:
         result = adapter.train(
             str(data_path),
@@ -603,9 +603,9 @@ def cmd_train(
             seed=seed,
             **train_extra_kwargs,
         )
-        click.echo(f"[Train] Training complete.")
+        click.echo("[Train] Training complete.")
     except KeyboardInterrupt:
-        click.echo(f"[Train] Training cancelled by user.")
+        click.echo("[Train] Training cancelled by user.")
         jm.update_status(job.job_id, JobStatus.CANCELLED, error="Cancelled by user")
         return
     except Exception as e:
@@ -616,7 +616,7 @@ def cmd_train(
         return
 
     elapsed = time.time() - t_start
-    click.echo(f"[Train] Elapsed: {elapsed:.1f}s")
+    click.echo("[Train] Elapsed: {elapsed:.1f}s")
 
     # Extract metrics
     metrics = adapter._extract_metrics(result, "") if hasattr(adapter, "_extract_metrics") else {}
@@ -657,7 +657,7 @@ def cmd_train(
 
         # Save model metadata
         meta_path = dst.with_suffix(".metadata.yaml")
-        with open(meta_path, "w") as f:
+        with open(meta_path, "w", encoding="utf-8") as f:
             yaml.dump(
                 {
                     "model": model_name,
@@ -678,7 +678,7 @@ def cmd_train(
     }
     try:
         if data_path.exists():
-            ds_cfg = yaml.safe_load(open(data_path))
+            ds_cfg = yaml.safe_load(open(data_path, encoding="utf-8"))
             dataset_snapshot["train"] = ds_cfg.get("train", "")
             dataset_snapshot["val"] = ds_cfg.get("val", "")
             dataset_snapshot["nc"] = ds_cfg.get("nc", 0)
@@ -686,7 +686,7 @@ def cmd_train(
         pass
 
     # Collect reproducibility metadata
-    reproducibility = {}
+    reproducibility: Dict[str, Any] = {}
     try:
         import subprocess as _sp
         r = _sp.run(
@@ -736,7 +736,7 @@ def cmd_train(
     onnx_exported_path = None
     if best_pt and best_pt.exists():
         try:
-            click.echo(f"[Train] Exporting ONNX...")
+            click.echo("[Train] Exporting ONNX...")
             onnx_path = str(models_dir / f"{model_version}.onnx")
             ds_yaml = str(data_path)
             export_result = adapter.export(
@@ -773,7 +773,7 @@ def cmd_train(
     if register_to_platform and onnx_exported_path:
         try:
             from ..integration.raven_go import register_model_to_platform
-            click.echo(f"[Train] Registering model to raven-go platform...")
+            click.echo("[Train] Registering model to raven-go platform...")
             reg_result = register_model_to_platform(
                 onnx_path=onnx_exported_path,
                 model_name=model_name,

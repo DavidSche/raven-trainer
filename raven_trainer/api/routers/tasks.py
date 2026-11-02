@@ -7,13 +7,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from ..schemas import AnnotationTaskSchema
-from ...data_asset.annotation.task import TaskManager, AnnotationTask
+from ...data_asset.annotation.task import TaskManager, AnnotationTask, TaskStatus
 
 router = APIRouter(tags=["tasks"])
 
 
 @router.get("/datasets/{dataset_name}/tasks")
-async def list_annotation_tasks(
+def list_annotation_tasks(
     dataset_name: str,
     version: str = Query("v1"),
     platform: Optional[str] = Query(None),
@@ -36,7 +36,7 @@ async def list_annotation_tasks(
 
 
 @router.post("/datasets/{dataset_name}/tasks")
-async def create_annotation_task(dataset_name: str, task: AnnotationTaskSchema, version: str = Query("v1")):
+def create_annotation_task(dataset_name: str, task: AnnotationTaskSchema, version: str = Query("v1")):
     tm = TaskManager(dataset_name, version)
     new_task = AnnotationTask(
         task_id=task.task_id,
@@ -45,12 +45,15 @@ async def create_annotation_task(dataset_name: str, task: AnnotationTaskSchema, 
         status="pending",
         image_count=task.image_count,
     )
-    tm.create_task(new_task)
+    try:
+        tm.create_task(new_task)
+    except FileExistsError as exc:
+        raise HTTPException(409, f"Task '{task.task_id}' already exists") from exc
     return {"status": "created", "task_id": task.task_id}
 
 
 @router.get("/datasets/{dataset_name}/tasks/{task_id}")
-async def get_annotation_task(dataset_name: str, task_id: str, version: str = Query("v1")):
+def get_annotation_task(dataset_name: str, task_id: str, version: str = Query("v1")):
     tm = TaskManager(dataset_name, version)
     task = tm.get_task(task_id)
     if not task:
@@ -69,16 +72,24 @@ async def get_annotation_task(dataset_name: str, task_id: str, version: str = Qu
 
 
 @router.put("/datasets/{dataset_name}/tasks/{task_id}")
-async def update_annotation_task(dataset_name: str, task_id: str, data: dict, version: str = Query("v1")):
+def update_annotation_task(dataset_name: str, task_id: str, data: dict, version: str = Query("v1")):
     tm = TaskManager(dataset_name, version)
     task = tm.get_task(task_id)
     if not task:
         raise HTTPException(404, f"Task '{task_id}' not found")
     if "status" in data:
-        task.status = data["status"]
+        new_status = data["status"]
+        if new_status not in TaskStatus:
+            raise HTTPException(
+                400, f"Invalid status '{new_status}'. Must be one of: {list(TaskStatus)}"
+            )
+        task.status = new_status
         # M-35: Use the dedicated update_task method instead of create_task,
         # which previously silently overwrote the task file and masked
         # "task missing" errors. update_task raises FileNotFoundError if
         # the task was deleted between get_task and the write.
-        tm.update_task(task)
+        try:
+            tm.update_task(task)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"Task '{task_id}' not found") from exc
     return {"status": "updated"}

@@ -1,6 +1,5 @@
-from .compose import AugmentPipeline
-from .copy_paste import CopyPaste
-from .occlusion import OcclusionAug
-from .industrial import IndustrialAugment
+"""Augmentation pipeline (all transforms live in :mod:`raven_trainer.augment.compose`)."""
+
+from .compose import AugmentPipeline, CopyPaste, OcclusionAug, IndustrialAugment
 
 __all__ = ["AugmentPipeline", "CopyPaste", "OcclusionAug", "IndustrialAugment"]

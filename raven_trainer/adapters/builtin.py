@@ -14,7 +14,7 @@ import sys
 import threading
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Type
 
 from .base import ModelAdapter, ModelInfo, ModelTask
 
@@ -348,7 +348,7 @@ class UltralyticsAdapter(ModelAdapter):
 
     def train(
         self,
-        data_cfg: str,
+        dataset_cfg: str | Path,
         *,
         log_func: Optional[Callable[[str], None]] = None,
         metric_func: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -358,7 +358,7 @@ class UltralyticsAdapter(ModelAdapter):
         """Run YOLO training with full ultralytics hyperparameter support.
 
         Args:
-            data_cfg: Path to dataset.yaml
+            dataset_cfg: Path to dataset.yaml
             log_func: Optional callback for training log messages
             metric_func: Optional callback for per-epoch structured metrics.
                 Receives a dict with epoch/loss/mAP/lr keys.
@@ -384,7 +384,7 @@ class UltralyticsAdapter(ModelAdapter):
         model = YOLO(model_name)
 
         # Validate dataset.yaml before passing to ultralytics
-        _validate_dataset_yaml(data_cfg, _log)
+        _validate_dataset_yaml(str(dataset_cfg), _log)
 
         # Merge config and kwargs, kwargs take precedence
         merged_config = dict(self.config)
@@ -406,7 +406,7 @@ class UltralyticsAdapter(ModelAdapter):
         extra_kwargs = self._filter_yolo_kwargs(merged_config)
 
         _log(
-            f"[Train] data={data_cfg}, epochs={epochs}, batch={batch}, "
+            f"[Train] data={dataset_cfg}, epochs={epochs}, batch={batch}, "
             f"imgsz={imgsz}, device={device}, name={name}"
         )
         if extra_kwargs:
@@ -470,9 +470,9 @@ class UltralyticsAdapter(ModelAdapter):
             sys.stdout = _dual_out
             sys.stderr = _dual_err
 
-            _log(f"[Train] Starting training...")
+            _log("[Train] Starting training...")
             results = model.train(
-                data=data_cfg,
+                data=str(dataset_cfg),
                 epochs=epochs,
                 batch=batch,
                 imgsz=imgsz,
@@ -484,10 +484,10 @@ class UltralyticsAdapter(ModelAdapter):
                 verbose=True,
                 **extra_kwargs,
             )
-            _log(f"[Train] Training completed successfully!")
+            _log("[Train] Training completed successfully!")
 
         except KeyboardInterrupt:
-            _log(f"[Train] Training cancelled by user.")
+            _log("[Train] Training cancelled by user.")
             # Re-raise so caller can handle
             raise
 
@@ -518,7 +518,7 @@ class UltralyticsAdapter(ModelAdapter):
 
     def evaluate(
         self,
-        dataset_cfg: str,
+        dataset_cfg: str | Path,
         *,
         weights: Optional[str] = None,
         split: str = "val",
@@ -598,7 +598,7 @@ class UltralyticsAdapter(ModelAdapter):
 
     def export(
         self,
-        output_path: str,
+        output_path: str | Path,
         fmt: str = "onnx",
         *,
         model_path: Optional[str] = None,
@@ -692,7 +692,7 @@ class UltralyticsAdapter(ModelAdapter):
                     break
 
             if not onnx_path.exists():
-                raise FileNotFoundError(f"ONNX file not found after export")
+                raise FileNotFoundError("ONNX file not found after export")
 
             file_size = onnx_path.stat().st_size
             result = {
@@ -706,7 +706,7 @@ class UltralyticsAdapter(ModelAdapter):
                 "simplify": simplify,
                 "opset": opset,
             }
-            _log(f"[Export] ONNX saved: {onnx_path} ({file_size / 1024 / 1024:.1f} MB)")
+            _log("[Export] ONNX saved: {onnx_path} ({file_size / 1024 / 1024:.1f} MB)")
 
             # Optional consistency verification
             if verify and dataset_yaml:

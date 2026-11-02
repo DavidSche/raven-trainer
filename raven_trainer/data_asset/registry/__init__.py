@@ -30,6 +30,8 @@ import shutil
 
 import yaml
 
+from ...config import validate_name
+
 
 class AssetStatus(str, Enum):
     ACTIVE = "active"
@@ -139,13 +141,14 @@ class AssetStore:
 
     def get_asset(self, name: str) -> Optional[DataAsset]:
         """根据 name 查找 DataAsset。"""
-        asset_file = self.root / name / "asset.yaml"
+        asset_file = self.asset_dir(name) / "asset.yaml"
         if asset_file.exists():
             return DataAsset.load(asset_file)
         return None
 
     def create_asset(self, asset: DataAsset) -> DataAsset:
         """创建新的 DataAsset。"""
+        asset.name = validate_name(asset.name, "dataset name")
         asset_dir = self.root / asset.name
         if asset_dir.exists():
             raise FileExistsError(f"Dataset '{asset.name}' already exists at {asset_dir}")
@@ -158,7 +161,7 @@ class AssetStore:
 
     def update_asset(self, asset: DataAsset) -> DataAsset:
         """更新已存在的 DataAsset。"""
-        asset_file = self.root / asset.name / "asset.yaml"
+        asset_file = self.asset_dir(asset.name) / "asset.yaml"
         if not asset_file.exists():
             raise FileNotFoundError(f"Dataset '{asset.name}' not found")
         asset.updated_at = datetime.now().isoformat()
@@ -167,14 +170,14 @@ class AssetStore:
 
     def delete_asset(self, name: str) -> None:
         """删除 DataAsset 及其所有版本和数据目录。"""
-        asset_dir = self.root / name
+        asset_dir = self.asset_dir(name)
         if not asset_dir.exists():
             raise FileNotFoundError(f"Dataset '{name}' not found at {asset_dir}")
         shutil.rmtree(asset_dir)
 
     def asset_dir(self, name: str) -> Path:
         """返回指定 DataAsset 的目录路径。"""
-        return self.root / name
+        return self.root / validate_name(name, "dataset name")
 
 
 class DatasetRegistry:
@@ -201,4 +204,3 @@ class DatasetRegistry:
 
     def delete(self, name: str) -> None:
         self.store.delete_asset(name)
-

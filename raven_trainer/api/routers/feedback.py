@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import re
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
@@ -55,7 +56,7 @@ def _get_thumbnail(path: str, max_size: int = 320) -> str | None:
 
 
 @router.get("/feedback/datasets")
-async def list_feedback_datasets():
+def list_feedback_datasets():
     """List datasets that have feedback data."""
     results = []
     datasets_dir = R.DATASETS
@@ -73,12 +74,14 @@ async def list_feedback_datasets():
 
 
 @router.get("/feedback/{dataset_name}")
-async def list_feedback(
+def list_feedback(
     dataset_name: str,
-    category: str = Query(None),
+    category: Optional[str] = Query(None),
     include_thumbnail: bool = Query(False),
 ):
     """List feedback items for a dataset, optionally with thumbnails."""
+    if category is not None:
+        _validate_category(category)
     fm = _get_feedback_manager(dataset_name)
     items = fm.list_feedback(category)
 
@@ -101,7 +104,7 @@ async def list_feedback(
 
 
 @router.get("/feedback/{dataset_name}/categories")
-async def feedback_category_summary(dataset_name: str):
+def feedback_category_summary(dataset_name: str):
     """Get category breakdown for a dataset."""
     from ...data_asset.feedback import FEEDBACK_CATEGORIES
     fm = _get_feedback_manager(dataset_name)
@@ -118,37 +121,48 @@ async def feedback_category_summary(dataset_name: str):
 
 
 @router.post("/feedback/{dataset_name}/approve")
-async def approve_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
+def approve_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
     category = data.get("category", "false_positive")
     filename = data.get("filename", "")
     _validate_category(category)
     _validate_filename(filename)
     fm = _get_feedback_manager(dataset_name)
-    fm.approve(category, filename)
+    try:
+        fm.approve(category, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"Feedback item not found: {category}/{filename}") from exc
     return {"status": "approved", "category": category, "filename": filename}
 
 
 @router.post("/feedback/{dataset_name}/reject")
-async def reject_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
+def reject_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
     category = data.get("category", "false_positive")
     filename = data.get("filename", "")
     _validate_category(category)
     _validate_filename(filename)
     fm = _get_feedback_manager(dataset_name)
-    fm.reject(category, filename)
+    try:
+        fm.reject(category, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"Feedback item not found: {category}/{filename}") from exc
     return {"status": "rejected", "category": category, "filename": filename}
 
 
 @router.post("/feedback/{dataset_name}/merge")
-async def merge_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
+def merge_feedback(dataset_name: str, data: dict = Body(default_factory=dict)):
     fm = _get_feedback_manager(dataset_name)
     version = data.get("version", "")
-    count = fm.merge(version)
+    try:
+        count = fm.merge(version)
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return {"status": "merged", "count": count}
 
 
 @router.get("/feedback/{dataset_name}/thumbnail/{filename:path}")
-async def feedback_thumbnail(dataset_name: str, filename: str, category: str = Query("false_positive")):
+def feedback_thumbnail(dataset_name: str, filename: str, category: str = Query("false_positive")):
     from fastapi.responses import FileResponse
     _validate_category(category)
     _validate_filename(filename)
@@ -158,8 +172,8 @@ async def feedback_thumbnail(dataset_name: str, filename: str, category: str = Q
     # Defense-in-depth: ensure resolved path is still under the category dir
     try:
         file_path.relative_to(cat_dir.resolve())
-    except ValueError:
-        raise HTTPException(400, "Path traversal detected")
+    except ValueError as exc:
+        raise HTTPException(400, "Path traversal detected") from exc
     if file_path.exists():
         return FileResponse(str(file_path))
     raise HTTPException(404, "Thumbnail not found")

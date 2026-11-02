@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml
@@ -28,7 +27,7 @@ def _count_images_fallback(asset_dir: Path) -> int:
 
 
 @router.get("/system/status")
-async def system_status():
+def system_status():
     """Overall system status overview for dashboard."""
     datasets_dir = R.DATASETS
     dataset_count = 0
@@ -79,7 +78,7 @@ async def system_status():
 
 
 @router.get("/system/activities")
-async def recent_activities(limit: int = 10):
+def recent_activities(limit: int = 10):
     """Recent activities across the system."""
     activities = []
 

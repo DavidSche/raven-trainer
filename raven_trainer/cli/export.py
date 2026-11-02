@@ -196,7 +196,7 @@ def cmd_export(
             from ..integration.raven_go import register_model_to_platform
             # 从 project.yaml 提取 task
             task = manifest.get("task", "detection")
-            click.echo(f"[Export] Registering model to raven-go platform...")
+            click.echo("[Export] Registering model to raven-go platform...")
             reg_result = register_model_to_platform(
                 onnx_path=str(out_path),
                 model_name=model_name,

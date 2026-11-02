@@ -31,7 +31,14 @@ dependencies = [
 [project.optional-dependencies]
 ultralytics = ["raven-ultralytics>=0.1.0"]
 rfdetr = ["raven-rfdetr[train]>=0.1.0"]
-all = ["raven-ultralytics>=0.1.0", "raven-rfdetr[train]>=0.1.0"]
+anomalib = ["raven-anomalib>=0.1.0"]
+mmdetection = ["raven-mmdetection>=0.1.0"]
+all = [
+    "raven-ultralytics>=0.1.0",
+    "raven-rfdetr[train]>=0.1.0",
+    "raven-anomalib>=0.1.0",
+    "raven-mmdetection>=0.1.0",
+]
 
 [dependency-groups]
 ingestion = [
@@ -40,11 +47,13 @@ ingestion = [
     "scikit-image>=0.22",
     "pillow>=10.0",
 ]
-# 训练组改为直接引用两个后端适配器包（等价于 `--extra all`），不再重复声明
+# 训练组改为直接引用后端适配器包（等价于 `--extra all`），不再重复声明
 # torch/ultralytics/onnxruntime 等重依赖——版本约束收敛到适配器包内。
 training = [
     "raven-ultralytics>=0.1.0",
     "raven-rfdetr[train]>=0.1.0",
+    "raven-anomalib>=0.1.0",
+    "raven-mmdetection>=0.1.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -52,17 +61,24 @@ dev = [
     "mypy>=1.8",
 ]
 
-# uv workspace：将同仓库的兄弟包（backend adapter）纳入统一解析/锁文件。
-# 成员用 `../` 引用（uv >=0.6 支持 workspace root 外的成员路径）。
+# uv workspace：将同仓库 adapters/ 下的 backend adapter 纳入统一解析/锁文件。
 [tool.uv.workspace]
-members = ["../raven-ultralytics", "../raven-rfdetr"]
+members = ["adapters/*"]
 
 [tool.uv.sources]
+raven-trainer = { workspace = true }
 raven-ultralytics = { workspace = true }
 raven-rfdetr = { workspace = true }
+raven-anomalib = { workspace = true }
+raven-mmdetection = { workspace = true }
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
 
 [project.scripts]
 raven-train = "raven_trainer.cli.main:main"
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -90,4 +106,4 @@ strict = false
 ignore_missing_imports = true
 
 [tool.pylint]
-max-line_length = 120
+max-line-length = 120

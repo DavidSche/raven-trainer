@@ -43,7 +43,7 @@ class DatasetSplitter:
         self.project_root = project_root or R.PROJECT_ROOT
 
     def _load_manifest(self) -> List[dict]:
-        with open(self.manifest_path) as f:
+        with open(self.manifest_path, encoding="utf-8") as f:
             return [json.loads(l) for l in f if l.strip()]
 
     def _extract_camera_id(self, filename: str, fallback_source: str = "") -> str:
@@ -75,7 +75,7 @@ class DatasetSplitter:
     def _count_labels(self, label_path: Path) -> int:
         if not label_path.exists():
             return 0
-        with open(label_path) as f:
+        with open(label_path, encoding="utf-8") as f:
             return len([l for l in f if l.strip()])
 
     def _classify_sample(self, label_count: int) -> str:
@@ -196,4 +196,3 @@ class DatasetSplitter:
                 counts[split_name] += 1
 
         return counts
-

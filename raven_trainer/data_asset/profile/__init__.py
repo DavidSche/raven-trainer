@@ -22,7 +22,7 @@ Profile 负责：训练怎么构建（目标格式、过滤规则、数据增强
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dataclass_fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -98,9 +98,11 @@ class BuildProfile:
     @classmethod
     def load(cls, path: Path) -> "BuildProfile":
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"BuildProfile must be a mapping, got {type(data).__name__}")
         # Filter to known dataclass fields to tolerate extra YAML keys
-        known = set(cls.__dataclass_fields__.keys())
+        known = {f.name for f in dataclass_fields(cls)}
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)
 
@@ -115,4 +117,3 @@ class BuildProfile:
     @classmethod
     def seg_default(cls, name: str = "seg") -> "BuildProfile":
         return cls(name=name, task="segmentation", target_format="coco")
-

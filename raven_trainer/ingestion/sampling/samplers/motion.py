@@ -16,7 +16,7 @@ class MotionSampler(BaseSampler):
 
     def __init__(self, motion_area_threshold: float = 0.5):
         self.motion_area_threshold = motion_area_threshold
-        self._mog2 = None
+        self._mog2: Any = None
 
     def on_start(self, ctx: StreamContext, cap: cv2.VideoCapture) -> None:
         self._mog2 = cv2.createBackgroundSubtractorMOG2()
@@ -30,4 +30,3 @@ class MotionSampler(BaseSampler):
         if meta.selected:
             meta.selected = motion_pct >= self.motion_area_threshold
         return meta
-

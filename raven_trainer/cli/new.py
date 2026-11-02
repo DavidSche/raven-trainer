@@ -224,13 +224,13 @@ class ProjectScaffolder:
 
     def _print_summary(self) -> None:
         click.echo(f"  +-- project.yaml     (manifest — backend: {self.backend})")
-        click.echo(f"  +-- dataset.yaml     (dataset config)")
-        click.echo(f"  +-- train.yaml       (train + export config)")
-        click.echo(f"  +-- configs/         (extra configs)")
-        click.echo(f"  +-- datasets/        (data references)")
-        click.echo(f"  +-- experiments/     (experiment logs)")
-        click.echo(f"  +-- outputs/         (model outputs)")
-        click.echo(f"  +-- README.md")
+        click.echo("  +-- dataset.yaml     (dataset config)")
+        click.echo("  +-- train.yaml       (train + export config)")
+        click.echo("  +-- configs/         (extra configs)")
+        click.echo("  +-- datasets/        (data references)")
+        click.echo("  +-- experiments/     (experiment logs)")
+        click.echo("  +-- outputs/         (model outputs)")
+        click.echo("  +-- README.md")
 
 
 # -------------------------------------------------------------------
@@ -256,5 +256,3 @@ def cmd_new(name: str, task: str, backend: str, model: str, dataset: str, templa
         template=template,
     )
     scaffolder.run()
-
-

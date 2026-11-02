@@ -1,0 +1,24 @@
+[project]
+name = "raven-mmdetection"
+version = "0.1.0"
+description = "Raven Trainer — MMDetection (RT-DETR) backend adapter"
+requires-python = ">=3.11"
+authors = [{ name = "Raven Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "raven-trainer>=0.2.0",
+    "mmdet>=3.3",
+]
+
+[project.entry-points."raven_trainer.adapters"]
+mmdetection = "raven_mmdetection:RavenMMDetectionAdapter"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["raven_mmdetection*"]

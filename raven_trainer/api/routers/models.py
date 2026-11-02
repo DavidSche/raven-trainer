@@ -5,9 +5,8 @@ Phase 2: 完整的模型详情、元数据、下载功能。
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -21,7 +20,7 @@ router = APIRouter(tags=["models"])
 
 def _scan_models() -> List[Dict[str, Any]]:
     """Scan projects directory for exported models."""
-    results = []
+    results: List[Dict[str, Any]] = []
     projects_dir = R.PROJECTS
     if not projects_dir.exists():
         return results
@@ -32,20 +31,28 @@ def _scan_models() -> List[Dict[str, Any]]:
         if not models_dir.exists():
             continue
         for model_file in sorted(models_dir.iterdir()):
-            if model_file.suffix not in ('.pt', '.onnx', '.engine'):
+            if model_file.suffix.lower() not in ('.pt', '.onnx', '.engine'):
                 continue
             meta_file = model_file.with_suffix('.metadata.yaml')
-            meta = {}
+            meta: Dict[str, Any] = {}
             if meta_file.exists():
                 import yaml
-                with open(meta_file, encoding='utf-8') as f:
-                    meta = yaml.safe_load(f) or {}
+                try:
+                    with open(meta_file, encoding='utf-8') as f:
+                        loaded = yaml.safe_load(f)
+                    # A malformed (non-mapping) file must not crash the listing.
+                    meta = loaded if isinstance(loaded, dict) else {}
+                except (OSError, yaml.YAMLError):
+                    meta = {}
             results.append({
-                "id": f"{proj_dir.name}_{model_file.stem}",
+                # Include the format in the id: `best.pt` and `best.onnx` share a
+                # stem, and a stem-only id made download/metadata return whichever
+                # file happened to be scanned first.
+                "id": f"{proj_dir.name}_{model_file.stem}_{model_file.suffix[1:]}",
                 "project": proj_dir.name,
                 "version": meta.get("version", model_file.stem),
                 "type": meta.get("task", "detection"),
-                "format": "pytorch" if model_file.suffix == '.pt' else model_file.suffix[1:],
+                "format": "pytorch" if model_file.suffix.lower() == '.pt' else model_file.suffix[1:].lower(),
                 "path": str(model_file),
                 "metrics": meta.get("metrics", {}),
                 "created_at": meta.get("created_at", ""),
@@ -55,14 +62,14 @@ def _scan_models() -> List[Dict[str, Any]]:
 
 
 @router.get("/models")
-async def list_models(limit: int = Query(50)):
+def list_models(limit: int = Query(50)):
     models = _scan_models()
     models.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return [ModelSchema(**m) for m in models[:limit]]
 
 
 @router.get("/models/stats")
-async def model_stats():
+def model_stats():
     """Aggregated model statistics."""
     models = _scan_models()
     by_project: Dict[str, int] = {}
@@ -85,7 +92,7 @@ async def model_stats():
 
 
 @router.get("/models/{model_id}")
-async def get_model(model_id: str):
+def get_model(model_id: str):
     models = _scan_models()
     for m in models:
         if m["id"] == model_id:
@@ -117,7 +124,7 @@ async def get_model(model_id: str):
 
 
 @router.get("/models/{model_id}/metadata")
-async def get_model_metadata(model_id: str):
+def get_model_metadata(model_id: str):
     """Get model metadata file content."""
     models = _scan_models()
     for m in models:
@@ -126,14 +133,18 @@ async def get_model_metadata(model_id: str):
             meta_file = model_path.with_suffix('.metadata.yaml')
             if meta_file.exists():
                 import yaml
-                with open(meta_file, encoding='utf-8') as f:
-                    return yaml.safe_load(f) or {}
+                try:
+                    with open(meta_file, encoding='utf-8') as f:
+                        loaded = yaml.safe_load(f)
+                except (OSError, yaml.YAMLError):
+                    return {}
+                return loaded if isinstance(loaded, dict) else {}
             return {}
     raise HTTPException(404, f"Model '{model_id}' not found")
 
 
 @router.get("/models/{model_id}/download")
-async def download_model(model_id: str):
+def download_model(model_id: str):
     models = _scan_models()
     for m in models:
         if m["id"] == model_id:

@@ -7,13 +7,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from ..schemas import JobSchema, JobLogSchema
-from ...data_asset.job import JobManager, JobStatus, JobType
+from ...data_asset.job import JobManager, JobStatus
 
 router = APIRouter(tags=["jobs"])
 
 
 @router.get("/jobs")
-async def list_jobs(
+def list_jobs(
     status: Optional[str] = Query(None),
     type_filter: Optional[str] = Query(None, alias="type"),
     dataset_name: Optional[str] = Query(None, alias="dataset_name"),
@@ -44,7 +44,7 @@ async def list_jobs(
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(job_id: str):
+def get_job(job_id: str):
     jm = JobManager()
     job = jm.get(job_id)
     if not job:
@@ -62,7 +62,7 @@ async def get_job(job_id: str):
 
 
 @router.get("/jobs/{job_id}/log")
-async def get_job_log(job_id: str):
+def get_job_log(job_id: str):
     from pathlib import Path
     jm = JobManager()
     job = jm.get(job_id)

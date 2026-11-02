@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +27,11 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from ..config import R
+from ..config import R, validate_name
+
+# Serialises experiment-id allocation within this process so two concurrent
+# training starts cannot both pick the same sequence number.
+_EXPERIMENT_ID_LOCK = threading.Lock()
 
 
 @dataclass
@@ -96,39 +101,43 @@ class ExperimentManager:
         self.project_name = project_name
         self.exp_root = R.project_dir(project_name) / "experiments"
 
+    def _exp_dir(self, experiment_id: str) -> Path:
+        """Resolve an experiment directory, rejecting unsafe ids."""
+        return self.exp_root / validate_name(experiment_id, "experiment id")
+
     def create(self, **kwargs) -> Experiment:
-        import re as _re
-        # Sequence based on max existing number rather than len(existing),
-        # so deleting an experiment and creating a new one does not collide
-        # with a previously-deleted higher-numbered experiment's records.
-        max_seq = 0
-        if self.exp_root.exists():
-            for d in self.exp_root.iterdir():
-                if not d.is_dir():
-                    continue
-                m = _re.match(r"^exp_(\d+)$", d.name)
-                if m:
-                    n = int(m.group(1))
-                    if n > max_seq:
-                        max_seq = n
-        seq = max_seq + 1
-        exp = Experiment(
-            experiment_id=f"exp_{seq:04d}",
-            project=self.project_name,
-            created_at=datetime.now().isoformat(),
-            **kwargs,
-        )
-        exp.save(self.exp_root / exp.experiment_id)
-        return exp
+        with _EXPERIMENT_ID_LOCK:
+            # Sequence based on max existing number rather than len(existing),
+            # so deleting an experiment and creating a new one does not collide
+            # with a previously-deleted higher-numbered experiment's records.
+            max_seq = 0
+            if self.exp_root.exists():
+                for d in self.exp_root.iterdir():
+                    if not d.is_dir():
+                        continue
+                    m = re.match(r"^exp_(\d+)$", d.name)
+                    if m:
+                        n = int(m.group(1))
+                        if n > max_seq:
+                            max_seq = n
+            seq = max_seq + 1
+            exp = Experiment(
+                experiment_id=f"exp_{seq:04d}",
+                project=self.project_name,
+                created_at=datetime.now().isoformat(),
+                **kwargs,
+            )
+            exp.save(self.exp_root / exp.experiment_id)
+            return exp
 
     def get(self, experiment_id: str) -> Optional[Experiment]:
-        path = self.exp_root / experiment_id
+        path = self._exp_dir(experiment_id)
         if path.exists() and (path / "experiment.yaml").exists():
             return Experiment.load(path)
         return None
 
     def list(self) -> List[Experiment]:
-        results = []
+        results: List[Experiment] = []
         if not self.exp_root.exists():
             return results
         for d in sorted(self.exp_root.iterdir(), reverse=True):
@@ -149,21 +158,21 @@ class ExperimentManager:
                 exp.finished_at = datetime.now().isoformat()
             if error:
                 exp.error = error
-            exp.save(self.exp_root / experiment_id)
+            exp.save(self._exp_dir(experiment_id))
         return exp
 
     def update_metrics(self, experiment_id: str, metrics: dict) -> Optional[Experiment]:
         exp = self.get(experiment_id)
         if exp:
             exp.metrics = metrics
-            exp.save(self.exp_root / experiment_id)
+            exp.save(self._exp_dir(experiment_id))
         return exp
 
 
 
     def append_log(self, experiment_id: str, message: str) -> None:
         """Append a log line to the experiments log file."""
-        log_dir = self.exp_root / experiment_id
+        log_dir = self._exp_dir(experiment_id)
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "train.log"
         if log_path.is_dir():
@@ -174,10 +183,20 @@ class ExperimentManager:
 
     def get_log(self, experiment_id: str) -> str:
         """Get the full log content."""
-        log_path = self.exp_root / experiment_id / "train.log"
+        log_path = self._exp_dir(experiment_id) / "train.log"
         if log_path.exists():
             return log_path.read_text(encoding="utf-8")
         return ""
+
+    def delete(self, experiment_id: str) -> bool:
+        """Delete an experiment directory. Returns True if something was removed."""
+        import shutil
+
+        exp_dir = self._exp_dir(experiment_id)
+        if not exp_dir.exists():
+            return False
+        shutil.rmtree(exp_dir)
+        return True
 
 # Factory function
 
@@ -187,7 +206,7 @@ def get_manager_for_project(project_name: str) -> ExperimentManager:
 
 def scan_all_experiments() -> List[Experiment]:
     """Scan all projects for experiments."""
-    results = []
+    results: List[Experiment] = []
     projects_dir = R.PROJECTS
     if not projects_dir.exists():
         return results
@@ -200,4 +219,3 @@ def scan_all_experiments() -> List[Experiment]:
         except Exception:
             pass
     return results
-

@@ -15,9 +15,51 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+class InvalidNameError(ValueError):
+    """Raised when a user-supplied name (dataset/version/project/...) is unsafe.
+
+    Names are used to build filesystem paths all over the codebase, so they
+    must never contain path separators, ``..`` segments, drive letters, or
+    control characters.  The API layer maps this error to HTTP 400.
+    """
+
+
+# Characters that must never appear in a path component on any platform.
+_FORBIDDEN_NAME_CHARS = frozenset('/\\:*?"<>|\x00')
+_MAX_NAME_LENGTH = 128
+
+
+def validate_name(name: str, kind: str = "name") -> str:
+    """Validate a single path component and return it unchanged.
+
+    Args:
+        name: Raw user input.
+        kind: Human-readable label used in the error message.
+
+    Raises:
+        InvalidNameError: If the name could escape its parent directory or is
+            otherwise unusable as a filesystem path component.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise InvalidNameError(f"Invalid {kind}: must be a non-empty string")
+    if name != name.strip():
+        raise InvalidNameError(f"Invalid {kind}: leading/trailing whitespace not allowed")
+    if len(name) > _MAX_NAME_LENGTH:
+        raise InvalidNameError(f"Invalid {kind}: exceeds {_MAX_NAME_LENGTH} characters")
+    if name in (".", "..") or ".." in name:
+        raise InvalidNameError(f"Invalid {kind}: '{name}' contains a path traversal sequence")
+    if name.startswith("."):
+        raise InvalidNameError(f"Invalid {kind}: '{name}' must not start with '.'")
+    for ch in name:
+        if ch in _FORBIDDEN_NAME_CHARS or ord(ch) < 32:
+            raise InvalidNameError(f"Invalid {kind}: '{name}' contains a forbidden character")
+    return name
 
 
 def _data_root() -> Path:
@@ -59,7 +101,7 @@ class R:
     # ── Projects (business projects with experiments + models) ──
     PROJECTS: Path = _PROJECT_ROOT / "projects"
 
-        # ── Pipeline Profiles ──
+    # ── Pipeline Profiles ──
     PIPELINE_PROFILES: Path = DATA / "pipeline" / "profiles"
 
     # ── Cache ──
@@ -78,40 +120,62 @@ class R:
     def resolve_storage_path(cls, storage_path: str) -> Path:
         p = Path(storage_path)
         if p.is_absolute():
-            if p.exists():
-                return p
+            resolved = p.resolve()
+            # Manifests are user-writable files; never let a crafted entry turn
+            # image serving into an arbitrary local-file read.
+            if not (
+                resolved.is_relative_to(cls.DATA.resolve())
+                or resolved.is_relative_to(cls.PROJECT_ROOT.resolve())
+            ):
+                raise FileNotFoundError(f"Storage path outside data root: {p}")
+            if resolved.exists():
+                return resolved
             raise FileNotFoundError(f"Storage path not found: {p}")
-        candidate = cls.PROJECT_ROOT / p
-        if candidate.exists():
-            return candidate
-        if not str(p).startswith("data/"):
-            candidate = cls.DATA / p
-            if candidate.exists():
-                return candidate
-        cwd_candidate = Path.cwd() / p
-        if cwd_candidate.exists():
-            return cwd_candidate
+        if ".." in p.parts:
+            raise FileNotFoundError(f"Storage path contains '..': {p}")
+        for candidate in (cls.PROJECT_ROOT / p, cls.DATA / p, Path.cwd() / p):
+            if not candidate.exists():
+                continue
+            resolved = candidate.resolve()
+            if (
+                resolved.is_relative_to(cls.DATA.resolve())
+                or resolved.is_relative_to(cls.PROJECT_ROOT.resolve())
+            ):
+                return resolved
         raise FileNotFoundError(
             f"Storage path not found: {storage_path}"
         )
 
+    @classmethod
+    def try_resolve_storage_path(cls, storage_path: str) -> Optional[Path]:
+        """Best-effort variant of :meth:`resolve_storage_path`.
+
+        Listings and exporters iterate over whole manifests, where a single
+        stale or hostile record must not abort the operation: unresolvable
+        entries simply resolve to ``None`` and are skipped by the caller.
+        """
+        try:
+            return cls.resolve_storage_path(storage_path)
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+
     # ── Recipe helpers (standalone, not tied to any single dataset) ──
     @classmethod
     def recipe_dir(cls, name: str) -> Path:
-        return cls.RECIPES / name
+        return cls.RECIPES / validate_name(name, "recipe name")
 
     @classmethod
     def recipe_yaml_path(cls, name: str) -> Path:
-        return cls.RECIPES / name / "recipe.yaml"
+        return cls.recipe_dir(name) / "recipe.yaml"
 
     # ── Domain Asset helpers ──
     @classmethod
     def dataset_dir(cls, name: str) -> Path:
-        return cls.DATASETS / name
+        return cls.DATASETS / validate_name(name, "dataset name")
 
     @classmethod
     def dataset_version_dir(cls, dataset_name: str, version: str) -> Path:
-        return cls.DATASETS / dataset_name / "versions" / version
+        return cls.dataset_dir(dataset_name) / "versions" / validate_name(version, "version")
 
     @classmethod
     def dataset_manifest_path(cls, dataset_name: str, version: str) -> Path:
@@ -119,16 +183,16 @@ class R:
 
     @classmethod
     def ingestion_run_dir(cls, run_id: str) -> Path:
-        return cls.INGESTION_RUNS / run_id
+        return cls.INGESTION_RUNS / validate_name(run_id, "run id")
 
     # ── Training Asset helpers ──
     @classmethod
     def workspace_dir(cls, name: str) -> Path:
-        return cls.WORKSPACE / name
+        return cls.WORKSPACE / validate_name(name, "workspace name")
 
     @classmethod
     def project_dir(cls, name: str) -> Path:
-        return cls.PROJECTS / name
+        return cls.PROJECTS / validate_name(name, "project name")
 
     @classmethod
     def experiment_dir(cls, project_name: str) -> Path:
@@ -137,4 +201,3 @@ class R:
     @classmethod
     def models_dir(cls, project_name: str) -> Path:
         return cls.project_dir(project_name) / "models"
-

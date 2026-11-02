@@ -68,7 +68,7 @@ class LabelStudioConverter:
             results = annotations[0].get("result", [])
             label_path = output_label_dir / f"{img_path.stem}.txt"
 
-            with open(label_path, "w") as f:
+            with open(label_path, "w", encoding="utf-8") as f:
                 for r in results:
                     if r.get("type") != "rectanglelabels":
                         continue
@@ -114,7 +114,7 @@ class LabelStudioConverter:
                 continue
 
             results = []
-            with open(label_file) as f:
+            with open(label_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:

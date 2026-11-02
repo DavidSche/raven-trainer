@@ -5,16 +5,12 @@ from __future__ import annotations
 import json
 import threading
 import contextlib
-import sys
-from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..schemas import IngestionRunSchema, StorageSourceSchema
 from ...config import R
-from ...ingestion.pipeline import IngestionPipeline
 from ...ingestion.profile import IngestionProfileManager, IngestionProfile, SourceRef
 from ...data_asset.job import JobManager, JobStatus, JobType
 
@@ -91,7 +87,7 @@ def _seed_default_profiles():
 
 
 @router.get("/storage/sources")
-async def list_storage_sources():
+def list_storage_sources():
     """List storage sources (videos/images from storage/)."""
     sources = []
     storage_videos = R.STORAGE_VIDEOS
@@ -117,7 +113,7 @@ async def list_storage_sources():
 
 
 @router.get("/ingestion/runs")
-async def list_ingestion_runs(limit: int = Query(50)):
+def list_ingestion_runs(limit: int = Query(50)):
     """List all ingestion run records."""
     runs_dir = R.INGESTION_RUNS
     results = []
@@ -127,7 +123,7 @@ async def list_ingestion_runs(limit: int = Query(50)):
             report_json = run_dir / "report.json"
             report = {}
             if report_json.exists():
-                with open(report_json) as f:
+                with open(report_json, encoding="utf-8") as f:
                     report = json.load(f)
             results.append(IngestionRunSchema(
                 run_id=run_id,
@@ -143,8 +139,8 @@ async def list_ingestion_runs(limit: int = Query(50)):
 
 
 @router.get("/ingestion/runs/{run_id}/report")
-async def get_ingestion_report(run_id: str):
-    run_dir = R.INGESTION_RUNS / run_id
+def get_ingestion_report(run_id: str):
+    run_dir = R.ingestion_run_dir(run_id)
     report_html = run_dir / "report.html"
     if report_html.exists():
         return {"html": report_html.read_text(encoding="utf-8")}
@@ -170,7 +166,7 @@ class CreateProfileRequest(BaseModel):
 
 
 @router.get("/ingestion/profiles")
-async def list_ingestion_profiles():
+def list_ingestion_profiles():
     """列出所有 Ingestion Profile，包含 last_run 信息。"""
     # M-41: Seed defaults lazily on the first user-facing list call rather
     # than at module import, so importing this router has no side effects.
@@ -213,7 +209,7 @@ async def list_ingestion_profiles():
 
 
 @router.get("/ingestion/profiles/{name}")
-async def get_ingestion_profile(name: str):
+def get_ingestion_profile(name: str):
     """获取 Ingestion Profile 详情。"""
     mgr = IngestionProfileManager()
     p = mgr.get_profile(name)
@@ -223,7 +219,7 @@ async def get_ingestion_profile(name: str):
 
 
 @router.post("/ingestion/profiles")
-async def create_ingestion_profile(req: CreateProfileRequest):
+def create_ingestion_profile(req: CreateProfileRequest):
     """创建 Ingestion Profile。"""
     mgr = IngestionProfileManager()
     existing = mgr.get_profile(req.name)
@@ -307,7 +303,7 @@ def _run_profile_thread(job_id: str, profile_name: str):
 
 
 @router.post("/ingestion/profiles/{name}/run")
-async def run_ingestion_profile(name: str):
+def run_ingestion_profile(name: str):
     """执行 Ingestion Profile（异步 Job 模式）。"""
     mgr = IngestionProfileManager()
     p = mgr.get_profile(name)
@@ -340,8 +336,7 @@ async def run_ingestion_profile(name: str):
 
 
 @router.delete("/ingestion/profiles/{name}")
-async def delete_ingestion_profile(name: str):
-    """更新 Ingestion Profile。"""
+def delete_ingestion_profile(name: str):
     """删除 Ingestion Profile。"""
     mgr = IngestionProfileManager()
     p = mgr.get_profile(name)
@@ -352,7 +347,7 @@ async def delete_ingestion_profile(name: str):
 
 
 @router.put("/ingestion/profiles/{name}")
-async def update_ingestion_profile(name: str, req: CreateProfileRequest):
+def update_ingestion_profile(name: str, req: CreateProfileRequest):
     """更新 Ingestion Profile。"""
     mgr = IngestionProfileManager()
     existing = mgr.get_profile(name)
@@ -377,8 +372,8 @@ async def update_ingestion_profile(name: str, req: CreateProfileRequest):
         pipeline=req.pipeline,
         sample_count=req.sample_count,
         target_dataset=req.target_dataset or name,
-        quality=existing.quality,
-        dedup=existing.dedup,
+        quality={**existing.quality, "blur_laplacian_threshold": req.blur_threshold},
+        dedup={**existing.dedup, "method": req.dedup_method, "hash_distance": req.dedup_distance},
         created_at=existing.created_at,
         decode=req.decode,
     )
@@ -387,7 +382,7 @@ async def update_ingestion_profile(name: str, req: CreateProfileRequest):
 
 
 @router.post("/ingestion/profiles/{name}/clone")
-async def clone_ingestion_profile(name: str, req: CreateProfileRequest):
+def clone_ingestion_profile(name: str, req: CreateProfileRequest):
     """克隆 Ingestion Profile 为新名称（Save As）。"""
     if not req.name or req.name == name:
         raise HTTPException(400, "New profile name must be different from source")

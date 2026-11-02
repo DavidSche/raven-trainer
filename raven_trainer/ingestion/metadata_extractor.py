@@ -16,13 +16,12 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import cv2
 import numpy as np
 
 from ..config import R
-from ..asset_manager import AssetManager
 
 
 class MetadataExtractor:
@@ -88,10 +87,9 @@ class MetadataExtractor:
         """将提取的元数据写入 data/datasets/<name>/metadata/。"""
         from ..data_asset.metadata import MetadataStore, ImageMetadata
 
-        ms = MetadataStore(R.dataset_dir(dataset_name) / "metadata")
-        count = 0
+        metas = []
         for i, rec in enumerate(records):
-            meta = ImageMetadata(
+            metas.append(ImageMetadata(
                 image_id=rec.get("image_id", f"{dataset_name}_{i:06d}"),
                 filename=rec.get("filename", ""),
                 camera=rec.get("camera", ""),
@@ -102,10 +100,12 @@ class MetadataExtractor:
                 blur_score=rec.get("blur_score", 0.0),
                 brightness=rec.get("brightness", 0.0),
                 quality_score=rec.get("quality_score", 0.0),
-            )
-            ms.add(meta)
-            count += 1
-        return count
+            ))
+        # One transaction + one connection lifetime per batch instead of
+        # committing (and leaking a SQLite handle) per image.
+        with MetadataStore(R.dataset_dir(dataset_name) / "metadata") as ms:
+            ms.add_batch(metas)
+        return len(metas)
 
     def _compute_sha256_prefix(self, path: Path, sample_size: int = 65536) -> str:
         """Compute SHA256 from the first ``sample_size`` bytes (default 64KB).
@@ -119,4 +119,3 @@ class MetadataExtractor:
             chunk = f.read(sample_size)
             h.update(chunk)
         return h.hexdigest()
-

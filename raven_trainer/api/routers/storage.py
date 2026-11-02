@@ -16,20 +16,20 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 
-from ...config import R
-from ...data_asset.changelog import ChangelogStore
+from ...config import R, validate_name
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ...ingestion.profile import IngestionProfile
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ def _format_duration(seconds: float) -> str:
 # ── Storage root ──
 
 @router.get("/storage/sources/for-dataset/{dataset_name}")
-async def get_sources_for_dataset(dataset_name: str):
+def get_sources_for_dataset(dataset_name: str):
     results = []
     for mt_name in MEDIA_TYPES:
         base = R.STORAGE / mt_name
@@ -195,7 +195,7 @@ async def get_sources_for_dataset(dataset_name: str):
 
 
 @router.get("/storage")
-async def get_storage_root():
+def get_storage_root():
     media_types = []
     total_images = total_videos = total_size = 0
     for mt_name, mt_config in MEDIA_TYPES.items():
@@ -238,7 +238,7 @@ async def get_storage_root():
 
 
 @router.get("/storage/{media_type}")
-async def get_media_type(media_type: str):
+def get_media_type(media_type: str):
     if media_type not in MEDIA_TYPES:
         raise HTTPException(404, f"Unknown media type '{media_type}'")
     mt_config = MEDIA_TYPES[media_type]
@@ -267,10 +267,10 @@ async def get_media_type(media_type: str):
 
 
 @router.get("/storage/{media_type}/{source}/browse")
-async def browse_source(media_type: str, source: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
+def browse_source(media_type: str, source: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
     if media_type not in MEDIA_TYPES:
         raise HTTPException(404, f"Unknown media type '{media_type}'")
-    src_dir = R.STORAGE / media_type / source
+    src_dir = R.STORAGE / media_type / validate_name(source, "source")
     if not src_dir.exists() or not src_dir.is_dir():
         raise HTTPException(404, f"Source '{source}' not found in {media_type}")
     exts = MEDIA_TYPES[media_type]["extensions"]
@@ -282,9 +282,10 @@ async def browse_source(media_type: str, source: str, offset: int = Query(0, ge=
 
 
 @router.get("/storage/{media_type}/{source}/file/{filename:path}")
-async def serve_source_file(media_type: str, source: str, filename: str):
+def serve_source_file(media_type: str, source: str, filename: str):
     if media_type not in MEDIA_TYPES:
         raise HTTPException(404, f"Unknown media type '{media_type}'")
+    source = validate_name(source, "source")
     src_resolved = (R.STORAGE / media_type / source).resolve()
     file_path = (R.STORAGE / media_type / source / filename).resolve()
     # Use is_relative_to (Python 3.9+) instead of str.startswith to avoid
@@ -302,8 +303,8 @@ async def serve_source_file(media_type: str, source: str, filename: str):
 # ── Video info ──
 
 @router.get("/storage/videos/{source}/info")
-async def get_video_source_info(source: str):
-    src_dir = R.STORAGE / "videos" / source
+def get_video_source_info(source: str):
+    src_dir = R.STORAGE / "videos" / validate_name(source, "source")
     if not src_dir.exists() or not src_dir.is_dir():
         raise HTTPException(404, f"Video source '{source}' not found")
     exts = MEDIA_TYPES["videos"]["extensions"]
@@ -401,7 +402,8 @@ class ExtractFramesRequest(BaseModel):
 
 
 @router.post("/storage/videos/{source}/extract")
-async def extract_frames_from_video(source: str, req: ExtractFramesRequest):
+def extract_frames_from_video(source: str, req: ExtractFramesRequest):
+    source = validate_name(source, "source")
     src_dir = R.STORAGE / "videos" / source
     if not src_dir.exists() or not src_dir.is_dir():
         raise HTTPException(404, f"Video source '{source}' not found")

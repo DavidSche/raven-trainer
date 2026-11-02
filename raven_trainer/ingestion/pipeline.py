@@ -76,7 +76,7 @@ class IngestionPipeline:
         for s in sources:
             meta = s.metadata
             if meta:
-                print(f"    {meta.source_name:25s} {meta.source_type:8s} {meta.resolution or '?':12s} {meta.total_frames or 0:>8} frames")
+                print("    {meta.source_name:25s} {meta.source_type:8s} {meta.resolution or '?':12s} {meta.total_frames or 0:>8} frames")
 
         if not sources:
             print("[Ingestion] No raw sources found.")
@@ -123,7 +123,7 @@ class IngestionPipeline:
 
                 saved = 0
                 for img_path in selected:
-                    dst = frame_dir / f"{saved:06d}{img_path.suffix}"
+                    dst = frame_dir / "{saved:06d}{img_path.suffix}"
                     try:
                         import shutil
                         shutil.copy2(str(img_path), str(dst))
@@ -131,14 +131,14 @@ class IngestionPipeline:
                         print(f"    [WARN] copy error for {img_path.name}: {copy_err}")
                         continue
 
-                    meta = FrameMeta(
+                    frame_meta = FrameMeta(
                         source_name=src.metadata.source_name,
                         frame_idx=saved,
                         timestamp_sec=0.0,
                         saved_path=dst,
                         selected=True,
                     )
-                    all_kept.append(meta)
+                    all_kept.append(frame_meta)
                     saved += 1
 
                 src_name = src.metadata.source_name
@@ -223,8 +223,14 @@ class IngestionPipeline:
 
         report.samples = [str(s.frame_path) for s in final] if final else []
 
+        # Drop rejected frames now that all stages have finished. Quality/Dedup
+        # used to unlink mid-pipeline, which broke re-runs and left nothing to
+        # inspect when a run failed halfway. Cleanup is scoped to this run's
+        # output dir so a manifest can never point at a deleted file.
+        self._cleanup_rejected(out, {s.frame_path for s in final})
+
         elapsed = _time.time() - t_start
-        print(f"\n[{_time.strftime('%H:%M:%S')}] Step 5/5: Complete in {elapsed:.1f}s")
+        print("\n[{_time.strftime('%H:%M:%S')}] Step 5/5: Complete in {elapsed:.1f}s")
         print(f"  Final kept: {len(final)} frames")
         print(report.summary())
 
@@ -257,6 +263,26 @@ class IngestionPipeline:
 
         return report
 
+    @staticmethod
+    def _cleanup_rejected(output_dir: Path, keep: set) -> None:
+        """Remove frames in ``output_dir`` that no stage kept."""
+        try:
+            root = Path(output_dir).resolve()
+            if not root.is_dir():
+                return
+            for entry in root.rglob("*"):
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
+                    continue
+                if entry in keep:
+                    continue
+                if not entry.resolve().is_relative_to(root):
+                    continue
+                entry.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"  [Cleanup] Skipped: {exc}")
+
     def _auto_register_asset(
         self,
         final_samples: List[ImportedSample],
@@ -279,7 +305,7 @@ class IngestionPipeline:
 
             data_assets_root = R.DATASETS
             if not data_assets_root.exists():
-                print(f"  [Auto-Register] data/datasets/ not found, skipping auto-register")
+                print("  [Auto-Register] data/datasets/ not found, skipping auto-register")
                 return
 
             # ── 1. Determine dataset name ──
@@ -311,18 +337,18 @@ class IngestionPipeline:
             storage_target.mkdir(parents=True, exist_ok=True)
 
             archived: List[Path] = []
-            source_names: List[str] = []
+            archived_source_names: List[str] = []
             for s in final_samples:
                 if not s.frame_path or not s.frame_path.exists():
                     continue
                 dst = storage_target / s.frame_path.name
                 if dst.exists():
                     stem, suffix = s.frame_path.stem, s.frame_path.suffix
-                    dst = storage_target / f"{stem}_{len(archived):04d}{suffix}"
+                    dst = storage_target / "{stem}_{len(archived):04d}{suffix}"
                 try:
                     _shutil.copy2(str(s.frame_path), str(dst))
                     archived.append(dst)
-                    source_names.append(s.source_name)
+                    archived_source_names.append(s.source_name)
                 except Exception as copy_err:
                     print(f"  [Auto-Register] copy error: {copy_err}")
 
@@ -341,11 +367,11 @@ class IngestionPipeline:
                 except ValueError:
                     storage_path = str(archived_path)  # fallback: absolute
                 manifest_records.append({
-                    "image_id": f"{dataset_name}_{i:06d}",
+                    "image_id": "{dataset_name}_{i:06d}",
                     "storage_path": storage_path,
-                    "source": source_names[i],
+                    "source": archived_source_names[i],
                     "capture_time": "",
-                    "camera": source_names[i],
+                    "camera": archived_source_names[i],
                 })
 
             # ── 5. Create version with manifest ──
@@ -353,9 +379,8 @@ class IngestionPipeline:
             vm = VersionManager(asset_dir)
 
             existing_versions = vm.list_versions()
-            next_num = len(existing_versions) + 1
-            version_str = f"v{next_num}"
-            version_dir = R.dataset_version_dir(dataset_name, version_str)
+            version_str = vm.next_version_str()
+            version_dir = vm.get_version_dir(version_str)
 
             # Clean broken version dir (exists without manifest -> previous failure)
             if version_dir.exists() and not (version_dir / "manifest.jsonl").exists():
@@ -428,5 +453,3 @@ class IngestionPipeline:
             print(f"  [Auto-Register Error] {e}")
             import traceback
             traceback.print_exc()
-
-

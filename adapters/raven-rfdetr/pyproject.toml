@@ -1,0 +1,50 @@
+[project]
+name = "raven-rfdetr"
+version = "0.1.0"
+description = "Raven Trainer — RF-DETR (detection / segmentation) backend adapter"
+requires-python = ">=3.11"
+authors = [{ name = "Raven Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "raven-trainer>=0.2.0",
+    # P0-1: 锁定单一 rf-detr 版本基线（本地源码 1.10.0.dev），保证接口行为与开发验证一致。
+    # 训练/评估依赖：`pip install "rfdetr[train,loggers]"`（PTL 排除 2.6.2/2.6.3）。
+    # rfdetr 为本地开发 checkout（未发布到 PyPI），uv 用户经 [tool.uv.sources]
+    # 指向本地路径；pip 用户需先 `pip install -e <rf-detr 路径>` 再装本包——
+    # 这样 dependencies 元数据保持可移植，不再硬编码机器相关 file:// 路径。
+    "rfdetr",
+    "numpy>=1.24",
+    "onnx>=1.12.0",
+    "onnxsim>=0.4.0",
+]
+
+[tool.uv.sources]
+rfdetr = { path = "E:/study-place/Davidche/2026/github/rf-detr" }
+
+[project.entry-points."raven_trainer.adapters"]
+rfdetr = "raven_rfdetr:RavenRFDETRAdapter"
+
+[project.optional-dependencies]
+train = [
+    "pytorch-lightning>=2.6,<3",
+    "supervision",
+    "pycocotools",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.10",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["raven_rfdetr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]

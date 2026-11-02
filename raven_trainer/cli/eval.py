@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import click
 import yaml as _yaml
@@ -67,6 +68,7 @@ def cmd_eval(
     project_name = manifest.get("name", project_path.parent.name)
 
     # Determine weights path — 兼容 .pt / .pth (P0-3)
+    weights_path: Optional[Path]
     if weights:
         weights_path = Path(weights)
     else:
@@ -116,7 +118,7 @@ def cmd_eval(
     adapter_cls = load_adapter(backend_name)
     adapter = adapter_cls(eval_cfg)
 
-    click.echo(f"[Eval] Running evaluation...")
+    click.echo("[Eval] Running evaluation...")
     try:
         metrics = adapter.evaluate(
             str(data_path),
@@ -135,16 +137,16 @@ def cmd_eval(
 
     if not metrics:
         jm.update_status(job.job_id, JobStatus.FAILED, error="No metrics returned")
-        click.echo(f"[Eval] No metrics returned. The adapter may not support standalone evaluation.")
-        click.echo(f"[Eval] Try running 'raven-train val' through the framework directly.")
+        click.echo("[Eval] No metrics returned. The adapter may not support standalone evaluation.")
+        click.echo("[Eval] Try running 'raven-train val' through the framework directly.")
         return
 
-    click.echo(f"\n[Eval] Results:")
+    click.echo("\n[Eval] Results:")
     for key, value in sorted(metrics.items()):
         if isinstance(value, float):
-            click.echo(f"  {key:30s} {value:.4f}")
+            click.echo("  {key:30s} {value:.4f}")
         else:
-            click.echo(f"  {key:30s} {value}")
+            click.echo("  {key:30s} {value}")
 
     # Determine eval sequence number up-front so it can be reused for CSV + YAML + report
     exp_dir = R.experiment_dir(project_name)
@@ -157,7 +159,7 @@ def cmd_eval(
         import csv as _csv
         per_class = {k: v for k, v in metrics.items() if "(B)" in k and k.startswith("metrics/")}
         if per_class:
-            csv_path = exp_dir / f"eval_{seq:03d}_per_class.csv"
+            csv_path = exp_dir / "eval_{seq:03d}_per_class.csv"
             with open(csv_path, "w", newline="", encoding="utf-8") as cf:
                 w = _csv.writer(cf)
                 w.writerow(["metric", "value"])
@@ -168,10 +170,10 @@ def cmd_eval(
         pass
 
     # Save to experiment record
-    eval_path = exp_dir / f"eval_{seq:03d}.yaml"
+    eval_path = exp_dir / "eval_{seq:03d}.yaml"
 
     record = {
-        "evaluation": f"eval_{seq:03d}",
+        "evaluation": "eval_{seq:03d}",
         "created_at": datetime.now().isoformat(),
         "model": model_name,
         "weights": str(weights_path),
@@ -196,7 +198,7 @@ def cmd_eval(
     # Generate evaluation report
     try:
         from ..report import generate_eval_report
-        report_path = exp_dir / f"eval_{seq:03d}_report.html"
+        report_path = exp_dir / "eval_{seq:03d}_report.html"
         generate_eval_report(
             eval_path=eval_path,
             project_name=project_name,

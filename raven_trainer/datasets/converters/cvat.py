@@ -31,9 +31,9 @@ def _read_image_dimensions(img_path: Path) -> Tuple[int, int]:
     # Try cv2 (OpenCV)
     try:
         import cv2
-        img = cv2.imread(str(img_path))
-        if img is not None:
-            h, w = img.shape[:2]
+        cv_img = cv2.imread(str(img_path))
+        if cv_img is not None:
+            h, w = cv_img.shape[:2]
             return (w, h)
     except Exception:
         pass
@@ -100,7 +100,7 @@ class CvatExporter:
             if not label_file.exists():
                 continue
 
-            with open(label_file) as f:
+            with open(label_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -169,8 +169,11 @@ class CvatImporter:
 
         processed_images: List[Path] = []
 
-        # Build reverse label map: name → id (M-24: moved outside loop)
-        label_to_id = {v: k for k, v in self.label_map.items()}
+        # ``label_map`` is already name → class-id for the importer. The
+        # previous reversed comprehension produced id → name, so every
+        # lookup by label name returned None and annotations were silently
+        # dropped.
+        label_to_id: Dict[str, int] = dict(self.label_map)
 
         for img_elem in root.findall("image"):
             img_name = img_elem.get("name", "")
@@ -182,7 +185,7 @@ class CvatImporter:
                 continue
 
             label_path = output_label_dir / f"{img_path.stem}.txt"
-            with open(label_path, "w") as f:
+            with open(label_path, "w", encoding="utf-8") as f:
                 for box in img_elem.findall("box"):
                     label_name = box.get("label", "")
                     cls_id = label_to_id.get(label_name)

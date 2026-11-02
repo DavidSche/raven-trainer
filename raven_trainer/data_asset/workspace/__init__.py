@@ -382,7 +382,7 @@ class WorkspaceBuilder:
                 # Load class names from asset.yaml
                 asset_yaml = self.data_root / dataset_name / "asset.yaml"
                 if asset_yaml.exists():
-                    with open(asset_yaml) as f:
+                    with open(asset_yaml, encoding="utf-8") as f:
                         ad = yaml.safe_load(f)
                         if ad and isinstance(ad, dict) and "names" in ad:
                             names_raw = ad["names"]
@@ -408,7 +408,7 @@ class WorkspaceBuilder:
                     # Extract class IDs from label
                     cls_ids = []
                     if label_path and label_path.exists():
-                        with open(label_path) as f:
+                        with open(label_path, encoding="utf-8") as f:
                             for line in f:
                                 line = line.strip()
                                 if line:
@@ -850,5 +850,3 @@ def build_workspace_from_yaml(
         output_dir=output_dir,
         force=force,
     )
-
-

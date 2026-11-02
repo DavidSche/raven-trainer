@@ -23,7 +23,21 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from ...config import validate_name
 from ..constants import IMAGE_EXTS
+
+
+def _version_sort_key(name: str) -> tuple:
+    """Sort key that orders ``v2`` before ``v10``.
+
+    Plain string sorting puts ``v10`` before ``v9``, which silently made
+    ``list_versions()[0]`` ("the latest version") wrong from v10 onwards.
+    Auto-numbered versions sort numerically; anything else sorts after them
+    by name so hand-crafted tags stay visible.
+    """
+    if name.startswith("v") and name[1:].isdigit():
+        return (0, int(name[1:]), name)
+    return (1, 0, name)
 
 
 @dataclass
@@ -99,26 +113,41 @@ class VersionManager:
         self.versions_dir.mkdir(parents=True, exist_ok=True)
 
     def list_versions(self) -> List[VersionSnapshot]:
-        """列出所有版本，按版本号降序排列。"""
+        """列出所有版本，按版本号降序排列（v10 排在 v9 之前）。"""
         snapshots: List[VersionSnapshot] = []
         if not self.versions_dir.exists():
             return snapshots
-        for entry in sorted(self.versions_dir.iterdir(), reverse=True):
-            if entry.is_dir():
-                snap_file = entry / "snapshot.yaml"
-                if snap_file.exists():
-                    try:
-                        snapshots.append(VersionSnapshot.load(snap_file))
-                    except Exception:
-                        pass
+        entries = [e for e in self.versions_dir.iterdir() if e.is_dir()]
+        for entry in sorted(entries, key=lambda e: _version_sort_key(e.name), reverse=True):
+            snap_file = entry / "snapshot.yaml"
+            if snap_file.exists():
+                try:
+                    snapshots.append(VersionSnapshot.load(snap_file))
+                except (OSError, yaml.YAMLError, KeyError, TypeError):
+                    # A single unreadable snapshot must not hide the others.
+                    continue
         return snapshots
 
     def get_version(self, version: str) -> Optional[VersionSnapshot]:
         """获取指定版本的快照。"""
-        snap_file = self.versions_dir / version / "snapshot.yaml"
+        snap_file = self.get_version_dir(version) / "snapshot.yaml"
         if snap_file.exists():
             return VersionSnapshot.load(snap_file)
         return None
+
+    def next_version_str(self) -> str:
+        """Return the next auto-numbered version (``max(vN) + 1``).
+
+        Uses the maximum existing number rather than ``len(versions) + 1`` so
+        that deleting an old version can never make a later create overwrite
+        an existing, immutable snapshot.
+        """
+        max_num = 0
+        for v in self.list_versions():
+            num_str = v.version[1:] if v.version.startswith("v") and v.version[1:].isdigit() else ""
+            if num_str and int(num_str) > max_num:
+                max_num = int(num_str)
+        return f"v{max_num + 1}"
 
     def create_version(
         self,
@@ -131,68 +160,68 @@ class VersionManager:
         source="manual",
         version_tag="",
     ) -> "VersionSnapshot":
-        # Use user-specified version_tag if provided, otherwise auto-number
+        """创建新版本（append-only）。
+
+        版本目录先写入临时目录，全部写成功后才原子重命名为最终目录，
+        避免半途失败留下一个“看起来存在但内容不全”的版本。
+        Pinned by tests: ``create_version`` never overwrites an existing tag.
+        """
+        existing = self.list_versions()
+        # Lineage always points at the newest existing snapshot, also when the
+        # caller pins an explicit tag (a manual tag is still a successor).
+        parent = existing[0].version if existing else None
+
         if version_tag:
-            version_str = version_tag
-            parent = None
-            existing = self.list_versions()
+            version_str = validate_name(version_tag, "version")
+            if (self.versions_dir / version_str).exists():
+                raise FileExistsError(f"Version '{version_str}' already exists")
         else:
-            existing = self.list_versions()
-            next_num = 1
-            parent = None
-            # Use max(version_number) + 1 across all existing versions rather
-            # than relying solely on existing[0] (which is sorted but may skip
-            # deleted versions) or len(existing)+1 (which collides after deletes).
-            if existing:
-                max_num = 0
-                for v in existing:
-                    try:
-                        # Only strip a single leading 'v' (lstrip('v') would
-                        # eat 'vv1' -> '1' too, masking naming violations).
-                        num_str = v.version[1:] if v.version.startswith("v") and v.version[1:].isdigit() else ""
-                        if num_str:
-                            n = int(num_str)
-                            if n > max_num:
-                                max_num = n
-                    except (ValueError, AttributeError):
-                        continue
-                next_num = max_num + 1
-                parent = existing[0].version
-            version_str = f"v{next_num}"
-        version_dir = self.versions_dir / version_str
-        annotations_dir = version_dir / "annotations"
-        annotations_dir.mkdir(parents=True, exist_ok=True)
-        (annotations_dir / "raw").mkdir(exist_ok=True)
-        (annotations_dir / "converted").mkdir(exist_ok=True)
+            version_str = self.next_version_str()
+
+        final_dir = self.versions_dir / version_str
+        if final_dir.exists():
+            raise FileExistsError(f"Version '{version_str}' already exists")
+        # Hidden temp dir: ignored by list_versions() and cleaned up on failure.
+        tmp_dir = self.versions_dir / f".tmp-{version_str}-{datetime.now():%Y%m%d%H%M%S%f}"
 
         image_count = 0
+        try:
+            annotations_dir = tmp_dir / "annotations"
+            annotations_dir.mkdir(parents=True, exist_ok=False)
+            (annotations_dir / "raw").mkdir(exist_ok=True)
+            (annotations_dir / "converted").mkdir(exist_ok=True)
 
-        if manifest_records:
-            import json
-            from ...asset_manager import AssetManager
-            am = AssetManager()
-            records = []
-            for rec in manifest_records:
-                record = am.create_manifest_record(**rec) if isinstance(rec, dict) else rec
-                records.append(record)
-            am.save_manifest(records, version_dir / "manifest.jsonl")
-            image_count = len(records)
-        elif source_images and source_images.exists():
-            image_count = sum(1 for f in source_images.iterdir()
-                            if f.suffix.lower() in IMAGE_EXTS)
+            if manifest_records:
+                from ...asset_manager import AssetManager
 
-        snapshot = VersionSnapshot(
-            version=version_str,
-            parent_version=parent,
-            description=description,
-            image_count=image_count,
-            source=source or (f"created from {source_images}" if source_images else "manual"),
-            recipe_ref=recipe_ref,
-            tags=tags or [],
-        )
-        snapshot.save(version_dir / "snapshot.yaml")
-        return snapshot
+                am = AssetManager()
+                records = []
+                for rec in manifest_records:
+                    record = am.create_manifest_record(**rec) if isinstance(rec, dict) else rec
+                    records.append(record)
+                am.save_manifest(records, tmp_dir / "manifest.jsonl")
+                image_count = len(records)
+            elif source_images and source_images.exists():
+                image_count = sum(1 for f in source_images.iterdir()
+                                  if f.suffix.lower() in IMAGE_EXTS)
+
+            snapshot = VersionSnapshot(
+                version=version_str,
+                parent_version=parent,
+                description=description,
+                image_count=image_count,
+                source=source or (f"created from {source_images}" if source_images else "manual"),
+                recipe_ref=recipe_ref,
+                tags=tags or [],
+            )
+            # snapshot.yaml is written last: its presence is what makes the
+            # version visible to list_versions().
+            snapshot.save(tmp_dir / "snapshot.yaml")
+            tmp_dir.rename(final_dir)
+            return snapshot
+        except BaseException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
     def get_version_dir(self, version: str) -> Path:
         """获取指定版本的目录。"""
-        return self.versions_dir / version
-
+        return self.versions_dir / validate_name(version, "version")

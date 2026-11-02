@@ -29,7 +29,7 @@ def discover_adapters() -> Dict[str, Type[ModelAdapter]]:
     2. Falls back to builtin adapters (ultralytics, etc.)
     """
     registry: Dict[str, Type[ModelAdapter]] = {}
-    
+
     # Step 1: entry_points discovery
     eps = entry_points(group="raven_trainer.adapters")
     for ep in eps:
@@ -41,7 +41,7 @@ def discover_adapters() -> Dict[str, Type[ModelAdapter]]:
                 registry[ep.name] = cls
         except Exception:
             pass
-    
+
     # Step 2: builtin adapters (no entry_points needed)
     try:
         from .builtin import BUILTIN_ADAPTERS
@@ -50,7 +50,7 @@ def discover_adapters() -> Dict[str, Type[ModelAdapter]]:
                 registry[name] = cls
     except ImportError:
         pass
-    
+
     return registry
 
 

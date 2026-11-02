@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from ...config import R
+from ...config import R, validate_name
 
 # Valid task lifecycle statuses
 TaskStatus = ("pending", "in_progress", "completed", "failed")
@@ -62,9 +62,24 @@ class AnnotationTask:
 
     @classmethod
     def load(cls, path: Path) -> "AnnotationTask":
+        from dataclasses import MISSING, fields
+
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return cls(**data)
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Task file must contain a mapping: {path}")
+        # Tolerate extra keys written by newer/older versions of the tool.
+        known = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        required = {
+            f.name
+            for f in fields(cls)
+            if f.default is MISSING and f.default_factory is MISSING
+        }
+        missing = required - set(filtered)
+        if missing:
+            raise ValueError(f"Task file {path} is missing required field(s): {sorted(missing)}")
+        return cls(**filtered)
 
 
 class TaskManager:
@@ -74,8 +89,15 @@ class TaskManager:
         self.tasks_dir = R.dataset_version_dir(dataset_name, version) / "annotations" / "tasks"
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
 
+    def _task_path(self, task_id: str) -> Path:
+        """Resolve a task YAML path, rejecting unsafe ids."""
+        return self.tasks_dir / f"task_{validate_name(task_id, 'task id')}.yaml"
+
     def create_task(self, task: AnnotationTask) -> Path:
-        path = self.tasks_dir / f"task_{task.task_id}.yaml"
+        """Create a new task file. Refuses to overwrite an existing task."""
+        path = self._task_path(task.task_id)
+        if path.exists():
+            raise FileExistsError(f"Task '{task.task_id}' already exists")
         task.save(path)
         return path
 
@@ -89,7 +111,7 @@ class TaskManager:
         and writes the updated task object back to the same path, so the
         intent is explicit and missing-task errors surface clearly.
         """
-        path = self.tasks_dir / f"task_{task.task_id}.yaml"
+        path = self._task_path(task.task_id)
         if not path.exists():
             raise FileNotFoundError(f"Task '{task.task_id}' not found")
         task.save(path)
@@ -100,12 +122,13 @@ class TaskManager:
         for f in sorted(self.tasks_dir.glob("task_*.yaml")):
             try:
                 tasks.append(AnnotationTask.load(f))
-            except Exception:
-                pass
+            except (OSError, yaml.YAMLError, TypeError, ValueError):
+                # One corrupt task file must not hide the rest.
+                continue
         return tasks
 
     def get_task(self, task_id: str) -> Optional[AnnotationTask]:
-        path = self.tasks_dir / f"task_{task_id}.yaml"
+        path = self._task_path(task_id)
         if path.exists():
             return AnnotationTask.load(path)
         return None
@@ -116,14 +139,11 @@ class TaskManager:
         task = self.get_task(task_id)
         if task:
             task.status = status
-            if status == TaskStatus[2]:  # "completed"
+            if status == "completed":
                 task.completed_at = datetime.now().isoformat()
-            task.save(self.tasks_dir / f"task_{task_id}.yaml")
+            task.save(self._task_path(task_id))
 
     def delete_task(self, task_id: str) -> None:
-        path = self.tasks_dir / f"task_{task_id}.yaml"
+        path = self._task_path(task_id)
         if path.exists():
             path.unlink()
-
-
-

@@ -102,12 +102,17 @@ raven-trainer/
 │   ├── exporters/           # Export helpers
 │   │   ...
 ├── projects/             # Business projects (config only)
+├── adapters/             # Backend adapter workspace packages
+│   ├── raven-ultralytics/
+│   ├── raven-mmdetection/
+│   ├── raven-anomalib/
+│   └── raven-rfdetr/
 ├── configs/              # Configuration templates
 ├── docs/                  # Specifications
 └── pyproject.toml
 ```
 
-## Adapter Packages (separate pip packages)
+## Adapter Packages (uv workspace)
 
 ```bash
 pip install raven-ultralytics   # YOLO26 / YOLO11 (det/seg/pose/obb/cls)

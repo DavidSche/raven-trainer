@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import cv2
 
 from ..core import StreamContext, FrameMeta
 from .base import BaseSampler

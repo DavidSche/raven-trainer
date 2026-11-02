@@ -46,7 +46,7 @@ class ModelAdapter(ABC):
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self._model = None
+        self._model: Any = None
 
     @classmethod
     @abstractmethod
