@@ -1,0 +1,21 @@
+# ONNX export configuration
+
+format: onnx
+opset: 17
+imgsz: 640
+batch: 1
+
+# Optimization
+dynamic: true  # dynamic batch size
+simplify: true
+half: false  # FP16 quantization
+
+# Metadata (mandatory per EXPORT_SPEC.md)
+metadata:
+  model_name: null  # auto-filled from project
+  model_version: 1.0
+  description: null
+  labels: null  # auto-filled from dataset
+
+# Output
+output_path: null  # defaults to project/checkpoints/model.onnx

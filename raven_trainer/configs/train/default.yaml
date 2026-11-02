@@ -1,0 +1,64 @@
+# Default training configuration — full ultralytics hyperparameter surface
+# References aiva-trainer's comprehensive parameter set.
+
+# ── Optimization ──
+epochs: 300
+batch: 16
+imgsz: 640
+optimizer: AdamW
+lr0: 0.001
+lrf: 0.01
+weight_decay: 0.0005
+momentum: 0.937
+warmup_epochs: 3
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+cos_lr: true
+patience: 50
+seed: 0
+
+# ── Data Augmentation ──
+# Color
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+
+# Geometry
+degrees: 0.0
+perspective: 0.0
+scale: 0.5
+shear: 0.0
+translate: 0.1
+fliplr: 0.5
+flipud: 0.0
+
+# Advanced
+mosaic: 1.0
+mixup: 0.1
+copy_paste: 0.0
+copy_paste_mode: flip
+auto_augment: randaugment
+erasing: 0.4
+crop_fraction: 1.0
+
+# ── Loss Weights ──
+box: 7.5
+cls: 0.5
+dfl: 1.5
+label_smoothing: 0.0
+
+# ── Runtime ──
+amp: true
+workers: 8
+close_mosaic: 10
+deterministic: true
+single_cls: false
+multi_scale: false
+rect: false
+dropout: 0.0
+val: true
+plots: true
+save_period: 10
+save_best_only: true
+freeze: 0
+nbs: 64

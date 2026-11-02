@@ -1,0 +1,18 @@
+# Full training pipeline configuration
+# References all sub-configs for a reproducible run
+
+project:
+  name: null  # filled by create_project
+  version: 1.0
+  task: detection
+
+paths:
+  dataset: configs/dataset/industrial_example.yaml
+  model: configs/model/yolo11_example.yaml
+  train: configs/train/default.yaml
+  export: configs/export/onnx_default.yaml
+
+experiment:
+  tracking: local  # local | wandb | mlflow
+  description: null
+  tags: []

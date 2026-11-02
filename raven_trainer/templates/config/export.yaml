@@ -1,0 +1,12 @@
+# Export Configuration Template
+
+format: onnx
+opset: 17
+imgsz: 640
+dynamic: true
+simplify: true
+half: false
+metadata:
+  model_name: null
+  model_version: 1.0
+  labels: null

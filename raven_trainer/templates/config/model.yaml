@@ -1,0 +1,6 @@
+# Model Configuration Template
+
+model: yolo11m
+task: detection
+pretrained: true
+imgsz: 640

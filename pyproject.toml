@@ -1,0 +1,93 @@
+[project]
+name = "raven-trainer"
+version = "0.5.0"
+description = "Raven AI Data Asset & Model Training Platform"
+requires-python = ">=3.11"
+authors = [{ name = "Raven Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "loguru>=0.7",
+    "rich>=13.0",
+    "pydantic>=2.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "scikit-image>=0.22",
+    "imagehash>=4.3",
+    "opencv-python>=4.9",
+    "pillow>=10.0",
+]
+
+# 后端适配器保持独立分发（插件依赖宿主，宿主不硬依赖插件）。这里以标准
+# extras 提供一键安装入口：`pip install "raven-trainer[ultralytics]"` 或
+# `uv sync --extra all`。核心安装仍然轻量（不拖 torch/ultralytics）。
+# 各适配器的重依赖（torch/ultralytics/rfdetr/onnxruntime 等）由适配器包
+# 自己声明，避免在宿主重复约束导致版本漂移（单一事实来源）。
+[project.optional-dependencies]
+ultralytics = ["raven-ultralytics>=0.1.0"]
+rfdetr = ["raven-rfdetr[train]>=0.1.0"]
+all = ["raven-ultralytics>=0.1.0", "raven-rfdetr[train]>=0.1.0"]
+
+[dependency-groups]
+ingestion = [
+    "opencv-python>=4.9",
+    "imagehash>=4.3",
+    "scikit-image>=0.22",
+    "pillow>=10.0",
+]
+# 训练组改为直接引用两个后端适配器包（等价于 `--extra all`），不再重复声明
+# torch/ultralytics/onnxruntime 等重依赖——版本约束收敛到适配器包内。
+training = [
+    "raven-ultralytics>=0.1.0",
+    "raven-rfdetr[train]>=0.1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pylint>=3.0",
+    "mypy>=1.8",
+]
+
+# uv workspace：将同仓库的兄弟包（backend adapter）纳入统一解析/锁文件。
+# 成员用 `../` 引用（uv >=0.6 支持 workspace root 外的成员路径）。
+[tool.uv.workspace]
+members = ["../raven-ultralytics", "../raven-rfdetr"]
+
+[tool.uv.sources]
+raven-ultralytics = { workspace = true }
+raven-rfdetr = { workspace = true }
+
+[project.scripts]
+raven-train = "raven_trainer.cli.main:main"
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+priority = "supplemental"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["raven_trainer*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml", "*.json", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pylint]
+max-line_length = 120

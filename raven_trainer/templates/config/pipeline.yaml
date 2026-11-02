@@ -1,0 +1,17 @@
+# Pipeline Configuration Template
+
+project:
+  name: null
+  version: 1.0
+  task: detection
+
+paths:
+  dataset: dataset.yaml
+  model: model.yaml
+  train: train.yaml
+  export: export.yaml
+
+experiment:
+  tracking: local
+  description: ""
+  tags: []

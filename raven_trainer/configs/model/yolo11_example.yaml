@@ -1,0 +1,19 @@
+# YOLO11 model configuration
+
+model: yolo11m
+task: detection
+
+# Pretrained weights
+pretrained: true
+pretrained_path: null  # auto-download if null
+
+# Architecture overrides
+backbone:
+  scale: medium  # nano, small, medium, large, xlarge
+
+head:
+  num_classes: 3
+
+# Input
+imgsz: 640
+channels: 3

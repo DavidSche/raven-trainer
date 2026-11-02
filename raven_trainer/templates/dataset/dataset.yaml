@@ -1,0 +1,15 @@
+# Dataset Configuration Template
+
+path: ./datasets
+train: train
+val: val
+test: test
+
+# Label map (index → name)
+names:
+  0: object
+
+task: detection
+format: yolo
+split_method: video_based
+hard_negative_ratio: 0.0

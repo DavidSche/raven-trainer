@@ -1,0 +1,25 @@
+# Training Configuration Template
+# All keys below must be in UltralyticsAdapter._VALID_YOLO_KEYS
+# or they will be silently dropped during training.
+
+epochs: 300
+batch: 16
+imgsz: 640
+optimizer: AdamW
+lr0: 0.001           # initial learning rate (lr is aliased to lr0)
+lrf: 0.01            # final lr factor (lr0 * lrf)
+cos_lr: true         # use cosine LR scheduler (NOT lr_scheduler: cosine)
+weight_decay: 0.0005
+amp: true
+patience: 50
+close_mosaic: 10     # disable mosaic for last N epochs to stabilize
+augment:
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  flipud: 0.0        # forbidden in industrial (people don't walk upside-down)
+  fliplr: 0.5
+  scale: 0.5
+  mosaic: 1.0
+  mixup: 0.1
+  copy_paste: 0.3

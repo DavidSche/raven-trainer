@@ -1,0 +1,30 @@
+# Industrial dataset configuration example
+# Raven Trainer Dataset Spec
+
+path: /data/datasets/person_intrusion
+train: images/train
+val: images/val
+test: images/test
+
+# Label map (index → name)
+names:
+  0: person
+  1: helmet
+  2: vest
+
+task: detection
+format: yolo
+
+# Split strategy: video_based (not random — avoids data leakage)
+split_method: video_based
+
+# Hard negative ratio (e.g. 20% background-only images)
+hard_negative_ratio: 0.2
+
+# Attribute annotations (for occlusion-aware training)
+attributes:
+  occlusion:
+    - none
+    - partial
+    - heavy
+  ignore_region: true

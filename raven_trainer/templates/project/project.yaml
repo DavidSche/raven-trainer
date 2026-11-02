@@ -1,0 +1,20 @@
+# Project Manifest Template
+# Each Raven Trainer project must have a project.yaml at its root.
+
+name: null  # required: snake_case project name
+version: 1.0
+task: null  # detection | pose | segmentation | classification | anomaly
+created: null  # auto-filled on creation
+
+dataset:
+  type: cvat  # cvat | label_studio | local
+  version: ""
+
+model:
+  type: yolo11m
+
+export:
+  format: onnx
+
+trainer:
+  version: "0.1.0"

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+node_modules/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Raven Trainer - Data Storage (all data lives under data/)
+data/
+
+# Legacy paths (kept for backward compat)
+projects/
+datasets/**/data/
+raw_data/
+raw_index.json
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+
+# OS
+.DS_Store
+Thumbs.db
