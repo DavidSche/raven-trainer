@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Raven Trainer — Anomalib (anomaly detection) backend adapter"
 requires-python = ">=3.11"
 authors = [{ name = "Raven Team" }]
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 readme = "README.md"
 
 dependencies = [
